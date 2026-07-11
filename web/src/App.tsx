@@ -95,6 +95,7 @@ import ChannelsPage from "@/pages/ChannelsPage";
 import WebhooksPage from "@/pages/WebhooksPage";
 import SystemPage from "@/pages/SystemPage";
 import ChatPage from "@/pages/ChatPage";
+import ChatThreadPage from "@/pages/ChatThreadPage";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { ThemeSwitcher } from "@/components/ThemeSwitcher";
 import { useI18n } from "@/i18n";
@@ -122,6 +123,15 @@ const CHAT_NAV_ITEM: NavItem = {
   path: "/chat",
   labelKey: "chat",
   label: "Chat",
+  icon: MessageSquare,
+};
+
+// DigiSpark reskin: /chat is now the message-thread client (ChatThreadPage);
+// the xterm/PTY mirror lives on at /terminal for power use, reachable via
+// the sidebar's Advanced disclosure.
+const TERMINAL_NAV_ITEM: NavItem = {
+  path: "/terminal",
+  label: "Terminal",
   icon: Terminal,
 };
 
@@ -156,10 +166,10 @@ const BUILTIN_ROUTES_CORE: Record<string, ComponentType> = {
   "/docs": DocsPage,
 };
 
-// Route placeholder for /chat.  The persistent ChatPage host (rendered
-// outside <Routes> when embedded chat is on) paints on top; this empty
-// element just claims the path so the `*` catch-all redirect doesn't
-// fire when the user navigates to /chat.
+// Route placeholder for /terminal.  The persistent ChatPage (xterm) host
+// (rendered outside <Routes> when embedded chat is on) paints on top; this
+// empty element just claims the path so the `*` catch-all redirect doesn't
+// fire when the user navigates to /terminal.
 function ChatRouteSink() {
   return null;
 }
@@ -196,6 +206,7 @@ const BUILTIN_NAV_REST: NavItem[] = [
   { path: "/config", labelKey: "config", label: "Config", icon: Settings },
   { path: "/env", labelKey: "keys", label: "Keys", icon: KeyRound },
   { path: "/system", label: "System", icon: Wrench },
+  TERMINAL_NAV_ITEM,
   {
     path: "/docs",
     labelKey: "documentation",
@@ -385,7 +396,10 @@ export default function App() {
   const sidebarStatus = useSidebarStatus();
   const isDocsRoute = pathname === "/docs" || pathname === "/docs/";
   const normalizedPath = pathname.replace(/\/$/, "") || "/";
-  const isChatRoute = normalizedPath === "/chat";
+  // /chat (message thread) and /terminal (xterm mirror) both want the
+  // full-height, no-bottom-padding chat layout.
+  const isTerminalRoute = normalizedPath === "/terminal";
+  const isChatRoute = normalizedPath === "/chat" || isTerminalRoute;
   const embeddedChat = isDashboardEmbeddedChatEnabled();
 
   // `dashboard.show_token_analytics` gates the Analytics nav item.  The
@@ -422,23 +436,27 @@ export default function App() {
   // — killing the session mid-paint.  Delaying host mount by the
   // plugin-load window (typically <50ms, worst case 2s safety timeout)
   // is the cheaper trade-off.
+  // The persistent host now backs /terminal (the xterm mirror); a plugin
+  // overriding it suppresses the host the same way it used to for /chat.
   const chatOverriddenByPlugin = useMemo(
-    () => manifests.some((m) => m.tab.override === "/chat"),
+    () => manifests.some((m) => m.tab.override === "/terminal"),
     [manifests],
   );
 
   const builtinRoutes = useMemo(
     () => ({
       ...BUILTIN_ROUTES_CORE,
-      ...(embeddedChat ? { "/chat": ChatRouteSink } : {}),
+      // DigiSpark reskin: /chat is the message-thread client (a normal
+      // route — it owns its own WebSocket and needs no persistent host).
+      "/chat": ChatThreadPage,
+      ...(embeddedChat ? { "/terminal": ChatRouteSink } : {}),
     }),
     [embeddedChat],
   );
 
   const builtinNav = useMemo(() => {
-    const base = embeddedChat
-      ? [CHAT_NAV_ITEM, ...BUILTIN_NAV_REST]
-      : BUILTIN_NAV_REST;
+    let base = [CHAT_NAV_ITEM, ...BUILTIN_NAV_REST];
+    if (!embeddedChat) base = base.filter((n) => n.path !== "/terminal");
     return showTokenAnalytics
       ? base
       : base.filter((n) => n.path !== "/analytics");
@@ -637,7 +655,7 @@ export default function App() {
             >
               <Button
                 onClick={() => {
-                  navigate(embeddedChat ? "/chat" : "/sessions");
+                  navigate("/chat");
                   closeMobile();
                 }}
                 aria-label="New chat"
@@ -834,7 +852,7 @@ export default function App() {
                 {embeddedChat &&
                   !chatOverriddenByPlugin &&
                   (pluginsLoading ? (
-                    isChatRoute ? (
+                    isTerminalRoute ? (
                       <div
                         className="flex min-h-0 min-w-0 flex-1 items-center justify-center"
                         aria-busy="true"
@@ -842,20 +860,20 @@ export default function App() {
                       >
                         <div className="flex items-center gap-2 text-sm text-muted-foreground">
                           <Spinner />
-                          <span>Loading chat…</span>
+                          <span>Loading terminal…</span>
                         </div>
                       </div>
                     ) : null
                   ) : (
                     <div
-                      data-chat-active={isChatRoute ? "true" : "false"}
+                      data-chat-active={isTerminalRoute ? "true" : "false"}
                       className={cn(
                         "min-h-0 min-w-0",
-                        isChatRoute ? "flex flex-1 flex-col" : "hidden",
+                        isTerminalRoute ? "flex flex-1 flex-col" : "hidden",
                       )}
-                      aria-hidden={!isChatRoute}
+                      aria-hidden={!isTerminalRoute}
                     >
-                      <ChatPage isActive={isChatRoute} />
+                      <ChatPage isActive={isTerminalRoute} />
                     </div>
                   ))}
               </div>

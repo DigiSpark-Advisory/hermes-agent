@@ -23,7 +23,7 @@ import { ListItem } from "@nous-research/ui/ui/components/list-item";
 import { Spinner } from "@nous-research/ui/ui/components/spinner";
 import { AlertCircle, MessageSquarePlus, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { useI18n } from "@/i18n";
 import { api, type SessionInfo } from "@/lib/api";
@@ -71,6 +71,7 @@ export function ChatSessionList({
   variant = "rail",
 }: ChatSessionListProps) {
   const { t } = useI18n();
+  const navigate = useNavigate();
   const [, setSearchParams] = useSearchParams();
   const [sessions, setSessions] = useState<SessionInfo[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -118,12 +119,19 @@ export function ChatSessionList({
 
   const reload = useCallback(() => setReloadNonce((n) => n + 1), []);
 
-  // Picking a row sets `/chat?resume=<id>`. Re-picking the row already in
-  // the terminal is a no-op (avoids a needless PTY teardown).
+  // Picking a row opens `/chat?resume=<id>`. Re-picking the active row is a
+  // no-op (avoids a needless teardown). The "recent" variant lives in the
+  // app sidebar and may be clicked from ANY page, so it navigates to /chat
+  // explicitly; the "rail" variant is already on the chat surface and only
+  // rewrites the resume param.
   const pick = useCallback(
     (id: string) => {
       onPicked?.();
       if (id === activeSessionId) return;
+      if (variant === "recent") {
+        navigate(`/chat?resume=${encodeURIComponent(id)}`);
+        return;
+      }
       setSearchParams(
         (prev) => {
           const next = new URLSearchParams(prev);
@@ -133,7 +141,7 @@ export function ChatSessionList({
         { replace: false },
       );
     },
-    [activeSessionId, onPicked, setSearchParams],
+    [activeSessionId, navigate, onPicked, setSearchParams, variant],
   );
 
   // "New chat" prefers ChatPage's robust handler (clears resume + forces a
