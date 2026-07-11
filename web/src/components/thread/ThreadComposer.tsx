@@ -3,6 +3,11 @@
  * textarea, Enter to send (Shift+Enter for newline), a quiet model pill that
  * opens the standalone ModelPickerDialog, the session tool count, and a
  * Send / Stop button.
+ *
+ * Mobile notes (v1.2): the textarea is text-base (16px) below the sm
+ * breakpoint — anything smaller trips iOS Safari's zoom-on-focus — and the
+ * wrapper's bottom padding honours env(safe-area-inset-bottom) so the
+ * composer clears the iPhone home indicator.
  */
 
 import { Button } from "@nous-research/ui/ui/components/button";
@@ -54,7 +59,7 @@ export function ThreadComposer({
   }, [text, disabled, running, onSend]);
 
   return (
-    <div className="mx-auto w-full max-w-4xl px-1 pb-4">
+    <div className="mx-auto w-full max-w-4xl px-1 pb-[max(1rem,env(safe-area-inset-bottom,0px))]">
       <div
         className={cn(
           "rounded-xl border border-current/10 bg-card shadow-md",
@@ -77,7 +82,7 @@ export function ThreadComposer({
           aria-label="Message Hermes"
           className={cn(
             "w-full resize-none border-0 bg-transparent outline-none",
-            "font-sans text-[0.95rem] leading-relaxed text-text-primary",
+            "font-sans text-base sm:text-[0.95rem] leading-relaxed text-text-primary",
             "placeholder:text-text-tertiary",
           )}
         />

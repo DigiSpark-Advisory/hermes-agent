@@ -84,29 +84,37 @@ export const hermesTealTheme: DashboardTheme = {
   terminalBackground: "#000000",
 };
 
+/**
+ * DigiSpark Dark (v1.2) — the dark counterpart to DigiSpark Light,
+ * REPURPOSING the registered "midnight" slot so no backend theme-list
+ * change is needed (the same trick `defaultTheme` uses for "default").
+ * Graphite canvas, same type + radius tokens as Light; the brand accent
+ * lifts #0053fd → #4d7fff for WCAG contrast on dark cards, applied via
+ * customCSS overriding the fork's --ds-* accent vars (cleared
+ * automatically on theme switch by the provider's customCSS handling).
+ */
 export const midnightTheme: DashboardTheme = {
   name: "midnight",
-  label: "Midnight",
-  description: "Deep blue-violet with cool accents",
+  label: "DigiSpark Dark",
+  description: "DigiSpark tokens on a deep graphite canvas",
   palette: {
-    background: { hex: "#0a0a1f", alpha: 1 },
-    midground: { hex: "#d4c8ff", alpha: 1 },
+    background: { hex: "#121419", alpha: 1 },
+    midground: { hex: "#e8eaf1", alpha: 1 },
     foreground: { hex: "#ffffff", alpha: 0 },
-    warmGlow: "rgba(167, 139, 250, 0.32)",
-    noiseOpacity: 0.8,
+    warmGlow: "rgba(77, 127, 255, 0.16)",
+    noiseOpacity: 0,
   },
   typography: {
     ...DEFAULT_TYPOGRAPHY,
-    fontSans: `"Inter", ${SYSTEM_SANS}`,
     fontMono: `"JetBrains Mono", ${SYSTEM_MONO}`,
-    fontUrl:
-      "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap",
-    letterSpacing: "-0.005em",
   },
   layout: {
-    ...DEFAULT_LAYOUT,
-    radius: "0.75rem",
+    radius: "0.45rem",
+    density: "comfortable",
   },
+  terminalBackground: "#0c0e12",
+  customCSS:
+    ":root { --ds-accent: #4d7fff; --ds-accent-hover: #6690ff; --ds-green: #34a37d; }",
 };
 
 export const emberTheme: DashboardTheme = {
