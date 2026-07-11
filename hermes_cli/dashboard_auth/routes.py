@@ -451,6 +451,11 @@ class _PasswordLoginBody(BaseModel):
     provider: str
     username: str
     password: str
+    # "Remember me" (DigiSpark v1.2). True → persistent cookies (30-day
+    # rolling session, the historical behaviour); False → browser-session
+    # cookies that die on close (see cookies.set_session_cookies). Default
+    # True so older clients that omit the field keep the old semantics.
+    remember: bool = True
     next: str = ""
 
 
@@ -541,6 +546,7 @@ async def auth_password_login(request: Request, body: _PasswordLoginBody):
         access_token_expires_in=expires_in,
         use_https=detect_https(request),
         prefix=_prefix(request),
+        persistent=body.remember,
     )
     return resp
 
