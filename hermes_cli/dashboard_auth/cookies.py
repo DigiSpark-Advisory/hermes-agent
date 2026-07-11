@@ -53,6 +53,16 @@ Refresh-token handling:
    deployment gets cleared. The transparent rotation flow ("expired AT +
    live RT → rotate server-side, else 401 → /login") lives in
    ``middleware._attempt_refresh``.
+
+Remember-me handling (DigiSpark v1.2):
+   ``set_session_cookies(persistent=False)`` — the login page's
+   "Remember me" UNCHECKED path — writes the AT as a browser-session
+   cookie (no Max-Age) and skips the RT cookie ENTIRELY. The session then
+   ends at browser close (or AT expiry, whichever first) with a clean
+   re-login; deliberately no refresh path exists that could silently
+   re-persist an un-remembered session on transparent AT rotation.
+   Default ``persistent=True`` preserves the historical behaviour for the
+   OAuth callback and remembered password logins.
 """
 from __future__ import annotations
 
@@ -149,6 +159,7 @@ def set_session_cookies(
     access_token_expires_in: int,
     use_https: bool,
     prefix: str = "",
+    persistent: bool = True,
 ) -> None:
     """Set the session cookies on the response.
 
@@ -161,20 +172,29 @@ def set_session_cookies(
     persist the RT cookie — the session then behaves as access-token-only
     until the AT expires. No other branch changes between the two cases.
 
+    ``persistent`` (default True) is the "Remember me" switch. ``False``
+    writes the AT as a browser-session cookie (no Max-Age) and SKIPS the
+    RT cookie entirely — see the module docstring's remember-me section
+    for why the RT must not be written on this path.
+
     ``prefix`` is the normalised X-Forwarded-Prefix value (e.g. ``/hermes``)
     or ``""`` for a direct deploy. It influences both the cookie name
     (``__Host-`` vs ``__Secure-`` vs bare) and the ``Path`` attribute.
     """
+    at_attrs = _common_attrs(use_https=use_https, prefix=prefix)
+    if persistent:
+        at_attrs["max_age"] = access_token_expires_in
     response.set_cookie(
         _resolved_name(SESSION_AT_COOKIE, use_https=use_https, prefix=prefix),
         access_token,
-        max_age=access_token_expires_in,
-        **_common_attrs(use_https=use_https, prefix=prefix),
+        **at_attrs,
     )
     # Contract v1: empty refresh token means "don't persist RT cookie".
     # Keeping a literal empty-value cookie around would be dead state at
-    # best, attack surface at worst.
-    if refresh_token:
+    # best, attack surface at worst. Non-persistent ("Remember me"
+    # unchecked) sessions skip the RT deliberately — no refresh path may
+    # outlive the browser session.
+    if refresh_token and persistent:
         response.set_cookie(
             _resolved_name(SESSION_RT_COOKIE, use_https=use_https, prefix=prefix),
             refresh_token,
