@@ -11,6 +11,7 @@ text ``#17171a``, brand blue ``#0053fd`` — with a dark variant via
 ``prefers-color-scheme: dark`` (canvas ``#121419``, card ``#1d2029``,
 accent lifted to ``#4d7fff`` for contrast). System font stack; no
 ``/fonts`` dependency, so the page renders even without the SPA bundle.
+Inputs are 1rem/16px — anything smaller trips iOS Safari's zoom-on-focus.
 
 Password forms carry a default-checked **Remember me** checkbox. Checked
 → persistent cookies (30-day rolling session); unchecked → browser-
@@ -205,6 +206,7 @@ _LOGIN_HTML_TEMPLATE = """\
     text-transform: uppercase;
     color: var(--text-3);
   }
+  /* 1rem = 16px — the iOS Safari zoom-on-focus threshold; do not shrink. */
   .field-input {
     width: 100%;
     padding: 0.6rem 0.75rem;
@@ -213,7 +215,7 @@ _LOGIN_HTML_TEMPLATE = """\
     border: 1px solid var(--hairline-strong);
     border-radius: calc(var(--radius) - 2px);
     font-family: inherit;
-    font-size: 0.9rem;
+    font-size: 1rem;
   }
   .field-input:focus-visible {
     outline: none;
