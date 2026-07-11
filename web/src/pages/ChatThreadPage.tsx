@@ -16,7 +16,7 @@ import { Spinner } from "@nous-research/ui/ui/components/spinner";
 import { Button } from "@nous-research/ui/ui/components/button";
 import { AlertCircle } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useLocation, useSearchParams } from "react-router-dom";
 
 import { Markdown } from "@/components/Markdown";
 import { PromptBar } from "@/components/thread/PromptBar";
@@ -165,13 +165,13 @@ function ChatThread({ resumeId }: { resumeId: string | null }) {
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       {/* Connection / resume problems — quiet, non-modal */}
       {disconnected && (
-        <div className="mx-auto mt-2 w-full max-w-3xl rounded border border-warning/50 bg-warning/10 px-3 py-1.5 text-xs text-warning">
+        <div className="mx-auto mt-2 w-full max-w-4xl rounded border border-warning/50 bg-warning/10 px-3 py-1.5 text-xs text-warning">
           Connection lost — reconnecting…
           {thread.connectionError ? ` (${thread.connectionError})` : ""}
         </div>
       )}
       {thread.resumeFailed && (
-        <div className="mx-auto mt-2 w-full max-w-3xl rounded border border-destructive/40 bg-destructive/5 px-3 py-1.5 text-xs text-destructive">
+        <div className="mx-auto mt-2 w-full max-w-4xl rounded border border-destructive/40 bg-destructive/5 px-3 py-1.5 text-xs text-destructive">
           Couldn't resume this conversation: {thread.resumeFailed}
         </div>
       )}
@@ -182,7 +182,7 @@ function ChatThread({ resumeId }: { resumeId: string | null }) {
         onScroll={onScroll}
         className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden"
       >
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-5 px-1 py-6">
+        <div className="mx-auto flex w-full max-w-4xl flex-col gap-5 px-1 py-6">
           {hiddenCount > 0 && (
             <div className="text-center">
               <Button size="sm" ghost onClick={() => setShowAll(true)}
@@ -224,7 +224,7 @@ function ChatThread({ resumeId }: { resumeId: string | null }) {
 
       {/* Blocking prompt (approval / clarify / secret) above the composer */}
       {thread.prompt && (
-        <div className="mx-auto w-full max-w-3xl px-1 pb-2">
+        <div className="mx-auto w-full max-w-4xl px-1 pb-2">
           <PromptBar
             prompt={thread.prompt}
             onApproval={(c) => void thread.respondApproval(c)}
@@ -249,9 +249,16 @@ function ChatThread({ resumeId }: { resumeId: string | null }) {
 
 export default function ChatThreadPage() {
   const [searchParams] = useSearchParams();
+  const location = useLocation();
   const resumeId = searchParams.get("resume");
-  // Key on the resume target: switching conversations tears down the socket
-  // + state and mounts a fresh thread (mirrors the PTY identity semantics
-  // the old terminal page used).
-  return <ChatThread key={resumeId ?? "@new"} resumeId={resumeId} />;
+  // Key on the resume target — or, for fresh threads, on the router's
+  // per-navigation location.key. The old static "@new" key was the
+  // new-chat-button bug: a /chat → /chat navigation never changed the key,
+  // so the thread never remounted and the button appeared dead until a full
+  // page reload. location.key is unique per history push, so every New chat
+  // click tears down the socket + state and mounts a clean thread, while a
+  // plain refresh (location.key === "default") stays stable.
+  return (
+    <ChatThread key={resumeId ?? `@new:${location.key}`} resumeId={resumeId} />
+  );
 }

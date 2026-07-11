@@ -54,7 +54,7 @@ export function ThreadComposer({
   }, [text, disabled, running, onSend]);
 
   return (
-    <div className="mx-auto w-full max-w-3xl px-1 pb-4">
+    <div className="mx-auto w-full max-w-4xl px-1 pb-4">
       <div
         className={cn(
           "rounded-xl border border-current/10 bg-card shadow-md",
