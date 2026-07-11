@@ -45,6 +45,13 @@ interface ChatSessionListProps {
    * omitted, we fall back to clearing the resume param ourselves.
    */
   onNewChat?: () => void;
+  /**
+   * "rail" (default) — the chat page's slide-over sheet: SESSIONS heading +
+   * its own New session button. "recent" — the app sidebar's Recent list:
+   * quiet heading, no New button (the sidebar's New chat button owns that
+   * affordance).
+   */
+  variant?: "rail" | "recent";
 }
 
 function rowLabel(session: SessionInfo, untitled: string): string {
@@ -61,6 +68,7 @@ export function ChatSessionList({
   className,
   onPicked,
   onNewChat,
+  variant = "rail",
 }: ChatSessionListProps) {
   const { t } = useI18n();
   const [, setSearchParams] = useSearchParams();
@@ -227,8 +235,14 @@ export function ChatSessionList({
       )}
     >
       <div className="flex items-center justify-between gap-2 px-2 pb-2">
-        <span className="text-display text-xs tracking-wider text-text-tertiary">
-          {t.sessions.title}
+        <span
+          className={cn(
+            variant === "recent"
+              ? "px-1 font-sans text-xs tracking-[0.08em] text-text-tertiary"
+              : "text-display text-xs tracking-wider text-text-tertiary",
+          )}
+        >
+          {variant === "recent" ? "Recent" : t.sessions.title}
         </span>
         <Button
           ghost
@@ -242,15 +256,17 @@ export function ChatSessionList({
         </Button>
       </div>
 
-      <Button
-        outlined
-        size="sm"
-        onClick={startNew}
-        prefix={<MessageSquarePlus />}
-        className="mx-2 mb-2 justify-center"
-      >
-        {t.sessions.newChat}
-      </Button>
+      {variant !== "recent" && (
+        <Button
+          outlined
+          size="sm"
+          onClick={startNew}
+          prefix={<MessageSquarePlus />}
+          className="mx-2 mb-2 justify-center"
+        >
+          {t.sessions.newChat}
+        </Button>
+      )}
 
       <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-1 pb-1">
         {content}

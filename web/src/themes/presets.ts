@@ -38,10 +38,40 @@ const DEFAULT_LAYOUT: ThemeLayout = {
 // Themes
 // ---------------------------------------------------------------------------
 
+/**
+ * DigiSpark fork: the default theme is the desktop app's light look
+ * (apps/desktop/src/styles.css + DESIGN.md), keyed by the same "default"
+ * name so no backend theme-list change is needed. The original upstream
+ * "Hermes Teal" values live on in `hermesTealTheme` below.
+ */
 export const defaultTheme: DashboardTheme = {
   name: "default",
+  label: "DigiSpark Light",
+  description: "Calm light theme with the desktop app's design tokens",
+  palette: {
+    background: { hex: "#f8faff", alpha: 1 },
+    midground: { hex: "#17171a", alpha: 1 },
+    foreground: { hex: "#ffffff", alpha: 0 },
+    warmGlow: "rgba(0, 83, 253, 0.14)",
+    noiseOpacity: 0,
+  },
+  typography: {
+    ...DEFAULT_TYPOGRAPHY,
+    fontMono: `"JetBrains Mono", ${SYSTEM_MONO}`,
+  },
+  layout: {
+    // Desktop tokens: --radius 0.75rem × --radius-scalar 0.6.
+    radius: "0.45rem",
+    density: "comfortable",
+  },
+  // The embedded TUI stays a dark console island on the light canvas.
+  terminalBackground: "#101418",
+};
+
+export const hermesTealTheme: DashboardTheme = {
+  name: "hermes-teal",
   label: "Hermes Teal",
-  description: "Classic dark teal — the canonical Hermes look",
+  description: "Classic dark teal — the canonical upstream Hermes look",
   palette: {
     background: { hex: "#041c1c", alpha: 1 },
     midground: { hex: "#ffe6cb", alpha: 1 },
@@ -214,11 +244,11 @@ export const nousBlueTheme: DashboardTheme = {
  */
 export const defaultLargeTheme: DashboardTheme = {
   name: "default-large",
-  label: "Hermes Teal (Large)",
-  description: "Hermes Teal with bigger fonts and roomier spacing",
+  label: "DigiSpark Light (Large)",
+  description: "DigiSpark Light with bigger fonts and roomier spacing",
   palette: defaultTheme.palette,
   typography: {
-    ...DEFAULT_TYPOGRAPHY,
+    ...defaultTheme.typography,
     baseSize: "18px",
     lineHeight: "1.65",
   },

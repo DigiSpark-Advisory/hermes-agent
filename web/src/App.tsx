@@ -17,11 +17,13 @@ import {
   Navigate,
   useLocation,
   useNavigate,
+  useSearchParams,
 } from "react-router-dom";
 import {
   Activity,
   BarChart3,
   BookOpen,
+  ChevronRight,
   Clock,
   Code,
   Cpu,
@@ -38,6 +40,7 @@ import {
   Package,
   PanelLeftClose,
   PanelLeftOpen,
+  Plus,
   Plug,
   Puzzle,
   Radio,
@@ -60,6 +63,7 @@ import { Spinner } from "@nous-research/ui/ui/components/spinner";
 import { Typography } from "@nous-research/ui/ui/components/typography/index";
 import { ConfirmDialog } from "@nous-research/ui/ui/components/confirm-dialog";
 import { cn } from "@/lib/utils";
+import { ChatSessionList } from "@/components/ChatSessionList";
 import { SidebarFooter } from "@/components/SidebarFooter";
 import { SidebarStatusStrip, gatewayLine } from "@/components/SidebarStatusStrip";
 import { useBelowBreakpoint } from "@nous-research/ui/hooks/use-below-breakpoint";
@@ -349,10 +353,15 @@ const SIDEBAR_COLLAPSED_KEY = "hermes-sidebar-collapsed";
 export default function App() {
   const { t } = useI18n();
   const { pathname } = useLocation();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { manifests, loading: pluginsLoading } = usePlugins();
   const { theme } = useTheme();
   const [mobileOpen, setMobileOpen] = useState(false);
   const closeMobile = useCallback(() => setMobileOpen(false), []);
+  // DigiSpark reskin: the 18-route nav is demoted behind one "Advanced"
+  // disclosure; the sidebar leads with New chat + Recent sessions.
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const [collapsed, setCollapsed] = useState(() => {
     try {
@@ -439,6 +448,12 @@ export default function App() {
     () => partitionSidebarNav(builtinNav, manifests),
     [builtinNav, manifests],
   );
+  // DigiSpark reskin: everything except Chat lives behind Advanced.
+  const advancedCoreItems = useMemo(
+    () => sidebarNav.coreItems.filter((i) => i.path !== "/chat"),
+    [sidebarNav.coreItems],
+  );
+  const resumeParam = searchParams.get("resume");
   const routes = useMemo(
     () => buildRoutes(builtinRoutes, manifests),
     [builtinRoutes, manifests],
@@ -575,11 +590,14 @@ export default function App() {
               >
                 <PluginSlot name="header-left" />
 
-                <Typography className="font-bold text-[1.125rem] leading-[0.95] tracking-[0.0525rem] text-midground uppercase">
-                  Hermes
-                  <br />
-                  Agent
-                </Typography>
+                <div className="flex min-w-0 flex-col">
+                  <Typography className="font-bold text-[1rem] leading-tight tracking-[0.02em] text-midground">
+                    Hermes
+                  </Typography>
+                  <span className="truncate font-sans text-[0.6875rem] leading-tight text-text-tertiary">
+                    DigiSpark analyst
+                  </span>
+                </div>
               </div>
 
               <Button
@@ -609,44 +627,85 @@ export default function App() {
               </Button>
             </div>
 
-            <ProfileSwitcher collapsed={isDesktopCollapsed} />
-
-            <nav
-              className="min-h-0 w-full flex-1 overflow-y-auto overflow-x-hidden border-t border-current/10 py-2"
-              aria-label={t.app.navigation}
+            {/* DigiSpark reskin — the sidebar leads with New chat + Recent;
+                the full route list is demoted behind one Advanced disclosure. */}
+            <div
+              className={cn(
+                "shrink-0 px-3 pt-3 pb-1",
+                isDesktopCollapsed && "lg:px-2",
+              )}
             >
-              <ul className="flex flex-col">
-                {sidebarNav.coreItems.map((item) => (
-                  <SidebarNavLink
-                    closeMobile={closeMobile}
-                    collapsed={isDesktopCollapsed}
-                    item={item}
-                    key={item.path}
-                    t={t}
-                    tooltipWarmRef={tooltipWarmRef}
-                  />
-                ))}
-              </ul>
+              <Button
+                onClick={() => {
+                  navigate(embeddedChat ? "/chat" : "/sessions");
+                  closeMobile();
+                }}
+                aria-label="New chat"
+                className={cn(
+                  "w-full justify-center gap-2 font-sans font-semibold normal-case tracking-normal",
+                  "!bg-[var(--ds-accent)] !text-white hover:!bg-[var(--ds-accent-hover)]",
+                  "shadow-sm",
+                  isDesktopCollapsed && "lg:px-0",
+                )}
+              >
+                <Plus className="h-4 w-4 shrink-0" />
+                <span className={cn(isDesktopCollapsed && "lg:hidden")}>
+                  New chat
+                </span>
+              </Button>
+            </div>
 
-              {sidebarNav.pluginItems.length > 0 && (
-                <div
-                  aria-labelledby="hermes-sidebar-plugin-nav-heading"
-                  className="flex flex-col border-t border-current/10 pb-2"
-                  role="group"
+            {/* Recent — quiet session switcher; rows navigate /chat?resume=… */}
+            <div
+              className={cn(
+                "min-h-0 flex-1 overflow-hidden pt-1",
+                isDesktopCollapsed && "lg:hidden",
+              )}
+            >
+              <ChatSessionList
+                activeSessionId={pathname.replace(/\/$/, "") === "/chat" ? resumeParam : null}
+                onPicked={closeMobile}
+                variant="recent"
+              />
+            </div>
+            {/* Collapsed mode has no Recent list — keep the column shape. */}
+            {isDesktopCollapsed && <div className="hidden min-h-0 flex-1 lg:block" />}
+
+            <div className="shrink-0 border-t border-current/10">
+              <button
+                type="button"
+                onClick={() => setAdvancedOpen((v) => !v)}
+                aria-expanded={advancedOpen}
+                aria-controls="hermes-advanced-nav"
+                className={cn(
+                  "flex w-full cursor-pointer items-center gap-2 px-5 py-2.5",
+                  "bg-transparent border-0 text-left",
+                  "font-sans text-xs tracking-[0.08em] text-text-tertiary",
+                  "hover:text-midground",
+                  isDesktopCollapsed && "lg:justify-center lg:px-0",
+                )}
+              >
+                <ChevronRight
+                  className={cn(
+                    "h-3.5 w-3.5 shrink-0 transition-transform duration-150",
+                    advancedOpen && "rotate-90",
+                  )}
+                />
+                <span className={cn(isDesktopCollapsed && "lg:hidden")}>
+                  Advanced
+                </span>
+              </button>
+
+              {advancedOpen && (
+                <nav
+                  id="hermes-advanced-nav"
+                  aria-label={t.app.navigation}
+                  className="max-h-[42dvh] overflow-y-auto overflow-x-hidden pb-1"
                 >
-                  <span
-                    className={cn(
-                      "px-5 pt-2.5 pb-1",
-                      "font-sans text-display text-xs tracking-[0.12em] text-text-tertiary",
-                      isDesktopCollapsed && "lg:hidden",
-                    )}
-                    id="hermes-sidebar-plugin-nav-heading"
-                  >
-                    {t.app.pluginNavSection}
-                  </span>
+                  <ProfileSwitcher collapsed={isDesktopCollapsed} />
 
                   <ul className="flex flex-col">
-                    {sidebarNav.pluginItems.map((item) => (
+                    {advancedCoreItems.map((item) => (
                       <SidebarNavLink
                         closeMobile={closeMobile}
                         collapsed={isDesktopCollapsed}
@@ -657,9 +716,67 @@ export default function App() {
                       />
                     ))}
                   </ul>
-                </div>
+
+                  {sidebarNav.pluginItems.length > 0 && (
+                    <div
+                      aria-labelledby="hermes-sidebar-plugin-nav-heading"
+                      className="flex flex-col border-t border-current/10 pb-2"
+                      role="group"
+                    >
+                      <span
+                        className={cn(
+                          "px-5 pt-2.5 pb-1",
+                          "font-sans text-display text-xs tracking-[0.12em] text-text-tertiary",
+                          isDesktopCollapsed && "lg:hidden",
+                        )}
+                        id="hermes-sidebar-plugin-nav-heading"
+                      >
+                        {t.app.pluginNavSection}
+                      </span>
+
+                      <ul className="flex flex-col">
+                        {sidebarNav.pluginItems.map((item) => (
+                          <SidebarNavLink
+                            closeMobile={closeMobile}
+                            collapsed={isDesktopCollapsed}
+                            item={item}
+                            key={item.path}
+                            t={t}
+                            tooltipWarmRef={tooltipWarmRef}
+                          />
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {/* Theme + language switchers — demoted here from the footer. */}
+                  <div
+                    className={cn(
+                      "flex items-center gap-2 border-t border-current/10 px-3 py-2",
+                      isDesktopCollapsed && "lg:flex-col lg:items-start lg:gap-3 lg:py-3",
+                    )}
+                  >
+                    <PluginSlot name="header-right" />
+
+                    <SidebarIconWithTooltip
+                      collapsed={isDesktopCollapsed}
+                      label={t.theme?.switchTheme ?? "Switch theme"}
+                      tooltipWarmRef={tooltipWarmRef}
+                    >
+                      <ThemeSwitcher collapsed={isDesktopCollapsed} dropUp />
+                    </SidebarIconWithTooltip>
+
+                    <SidebarIconWithTooltip
+                      collapsed={isDesktopCollapsed}
+                      label={t.language.switchTo}
+                      tooltipWarmRef={tooltipWarmRef}
+                    >
+                      <LanguageSwitcher collapsed={isDesktopCollapsed} dropUp />
+                    </SidebarIconWithTooltip>
+                  </div>
+                </nav>
               )}
-            </nav>
+            </div>
 
             <SidebarSystemActions
               collapsed={isDesktopCollapsed}
@@ -667,42 +784,6 @@ export default function App() {
               status={sidebarStatus}
               tooltipWarmRef={tooltipWarmRef}
             />
-
-            <div
-              className={cn(
-                "flex shrink-0 items-center gap-2",
-                "px-3 py-2",
-                "border-t border-current/20",
-                isDesktopCollapsed
-                  ? "lg:flex-col lg:items-start lg:gap-3 lg:py-3"
-                  : "justify-between",
-              )}
-            >
-              <div
-                className={cn(
-                  "flex min-w-0 items-center gap-2",
-                  isDesktopCollapsed && "lg:flex-col lg:items-start",
-                )}
-              >
-                <PluginSlot name="header-right" />
-
-                <SidebarIconWithTooltip
-                  collapsed={isDesktopCollapsed}
-                  label={t.theme?.switchTheme ?? "Switch theme"}
-                  tooltipWarmRef={tooltipWarmRef}
-                >
-                  <ThemeSwitcher collapsed={isDesktopCollapsed} dropUp />
-                </SidebarIconWithTooltip>
-
-                <SidebarIconWithTooltip
-                  collapsed={isDesktopCollapsed}
-                  label={t.language.switchTo}
-                  tooltipWarmRef={tooltipWarmRef}
-                >
-                  <LanguageSwitcher collapsed={isDesktopCollapsed} dropUp />
-                </SidebarIconWithTooltip>
-              </div>
-            </div>
 
             <div
               className={cn(
@@ -844,7 +925,7 @@ function SidebarNavLink({
           cn(
             "group/nav relative flex items-center gap-3",
             "px-5 py-2.5",
-            "font-sans text-display uppercase text-sm tracking-[0.12em]",
+            "font-sans text-sm normal-case tracking-[0.02em]",
             "whitespace-nowrap transition-colors cursor-pointer",
             "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-midground",
             isActive

@@ -48,18 +48,28 @@
 /* ------------------------------------------------------------------ */
 
 :root {
-  /* LENS_0 — from design-language/src/ui/components/overlays/index.tsx.
-     These are the defaults for the `default` (Hermes Teal) dashboard theme;
-     ThemeProvider rewrites them as inline styles when a user switches themes. */
+  /* DigiSpark fork: defaults match the `default` (DigiSpark Light) dashboard
+     theme — the desktop app's tokens (apps/desktop/src/styles.css) — so first
+     paint is light with no dark flash. ThemeProvider rewrites these as inline
+     styles when a user switches themes. */
   --foreground: color-mix(in srgb, #ffffff 0%, transparent);
   --foreground-base: #ffffff;
   --foreground-alpha: 0;
-  --midground: color-mix(in srgb, #ffe6cb 100%, transparent);
-  --midground-base: #ffe6cb;
+  --midground: color-mix(in srgb, #17171a 100%, transparent);
+  --midground-base: #17171a;
   --midground-alpha: 1;
-  --background: color-mix(in srgb, #041c1c 100%, transparent);
-  --background-base: #041c1c;
+  --background: color-mix(in srgb, #f8faff 100%, transparent);
+  --background-base: #f8faff;
   --background-alpha: 1;
+
+  /* DigiSpark desktop accents — outside the theme palette engine (which only
+     knows background/midground/foreground). Used by the reskinned shell:
+     the New chat button, status greens, and warm highlights. */
+  --ds-accent: #0053fd;
+  --ds-accent-hover: color-mix(in srgb, #0053fd 88%, #000000);
+  --ds-sidebar: #f3f7ff;
+  --ds-green: #1f8a65;
+  --ds-warm: #cf806d;
 
   /* Typography tokens — rewritten by ThemeProvider. Defaults match the
      system stack so themes that don't override look native. */
@@ -72,9 +82,9 @@
   --theme-line-height: 1.55;
   --theme-letter-spacing: 0;
 
-  /* Layout tokens. */
-  --radius: 0.5rem;
-  --theme-radius: 0.5rem;
+  /* Layout tokens — desktop: --radius 0.75rem × --radius-scalar 0.6. */
+  --radius: 0.45rem;
+  --theme-radius: 0.45rem;
   --theme-spacing-mul: 1;
   --theme-density: comfortable;
 
@@ -84,8 +94,8 @@
      look: cream input + emerald-400 output read as warm/cool against
      the dark canvas. Themes override via ThemeProvider, which emits
      these as `--series-input-token` / `--series-output-token`. */
-  --series-input-token: #ffe6cb;
-  --series-output-token: #34d399;
+  --series-input-token: #0053fd;
+  --series-output-token: #1f8a65;
 }
 
 /* Theme tokens cascade into the document root so every descendant inherits
