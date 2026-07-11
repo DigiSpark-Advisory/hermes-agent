@@ -349,10 +349,9 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
       setEnd(null);
       return;
     }
-    if (!narrow) {
-      setEnd(null);
-      return;
-    }
+    // DigiSpark reskin: the persistent MODEL/TOOLS right rail is gone at all
+    // widths; the slide-over sheet (formerly mobile-only) is the single home
+    // for the model picker + session tools, opened from this header button.
     setEnd(
       <Button
         ghost
@@ -982,7 +981,6 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
   // descendants below those layers (see Toast.tsx).
   const mobileModelToolsPortal =
     isActive &&
-    narrow &&
     portalRoot &&
     createPortal(
       <>
@@ -1137,33 +1135,9 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
           </Button>
         </div>
 
-        {!narrow && (
-          <div
-            id="chat-side-panel"
-            role="complementary"
-            aria-label={modelToolsLabel}
-            className="flex min-h-0 shrink-0 flex-col gap-3 overflow-hidden lg:h-full lg:w-60"
-          >
-            {/* Model picker — keeps the rail thin. */}
-            <div className="shrink-0">
-              <ChatSidebar
-                channel={channel}
-                profile={scopedProfile}
-                onDashboardNewSessionRequest={startFreshDashboardChat}
-                onSessionTitleChange={handleSessionTitleChange}
-              />
-            </div>
-
-            {/* Session switcher fills the remaining height below the model box. */}
-            <div className="min-h-0 flex-1 overflow-hidden">
-              <ChatSessionList
-                activeSessionId={resumeParam}
-                profile={scopedProfile}
-                onNewChat={startFreshDashboardChat}
-              />
-            </div>
-          </div>
-        )}
+        {/* DigiSpark reskin: no persistent right rail. The model picker +
+            session list live in the slide-over sheet (header button) and the
+            app sidebar's Recent list. */}
       </div>
       <PluginSlot name="chat:bottom" />
     </div>
