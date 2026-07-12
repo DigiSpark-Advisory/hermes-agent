@@ -138,6 +138,13 @@
   font-family: var(--theme-font-sans);
 }
 
+/* DS Buttons are squared by design; the sidebar's New chat primary is the
+   one rounded primary in the shell (wireframe). The aria-label is its
+   stable hook — update both together if the label ever changes. */
+#app-sidebar button[aria-label="New chat"] {
+  border-radius: var(--radius-md);
+}
+
 /* Theme tokens cascade into the document root so every descendant inherits
    the font stack, base size, and letter spacing without explicit calls. */
 html {
