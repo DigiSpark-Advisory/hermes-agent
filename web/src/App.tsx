@@ -107,8 +107,11 @@ import { isDashboardEmbeddedChatEnabled } from "@/lib/dashboard-flags";
 import { api } from "@/lib/api";
 import type { StatusResponse, UpdateCheckResponse } from "@/lib/api";
 
+// DigiSpark v1.2: the thread client is the primary surface — land there.
+// (Was /sessions, which is a Phase-3 power page and made a fresh login look
+// like the reskin hadn't applied.)
 function RootRedirect() {
-  return <Navigate to="/sessions" replace />;
+  return <Navigate to="/chat" replace />;
 }
 
 function UnknownRouteFallback({ pluginsLoading }: { pluginsLoading: boolean }) {
@@ -116,7 +119,7 @@ function UnknownRouteFallback({ pluginsLoading }: { pluginsLoading: boolean }) {
     // Render nothing during the plugin-load window — a spinner here would just flash.
     return null;
   }
-  return <Navigate to="/sessions" replace />;
+  return <Navigate to="/chat" replace />;
 }
 
 const CHAT_NAV_ITEM: NavItem = {
@@ -608,12 +611,22 @@ export default function App() {
               >
                 <PluginSlot name="header-left" />
 
+                {/* DigiSpark v1.2: spark glyph + wordmark (wireframe brand row). */}
+                <span
+                  aria-hidden
+                  className={cn(
+                    "flex h-6 w-6 shrink-0 items-center justify-center rounded-md",
+                    "bg-[var(--ds-accent)] text-[0.7rem] font-bold text-white",
+                  )}
+                >
+                  ◆
+                </span>
                 <div className="flex min-w-0 flex-col">
                   <Typography className="font-bold text-[1rem] leading-tight tracking-[0.02em] text-midground">
-                    Hermes
+                    DigiSpark
                   </Typography>
                   <span className="truncate font-sans text-[0.6875rem] leading-tight text-text-tertiary">
-                    DigiSpark analyst
+                    Analyst workspace
                   </span>
                 </div>
               </div>
