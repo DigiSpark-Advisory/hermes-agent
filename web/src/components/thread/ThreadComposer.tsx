@@ -8,10 +8,14 @@
  * breakpoint — anything smaller trips iOS Safari's zoom-on-focus — and the
  * wrapper's bottom padding honours env(safe-area-inset-bottom) so the
  * composer clears the iPhone home indicator.
+ *
+ * v1.3: optional zoom stepper (A− / % / A+) — the page owns the zoom state
+ * and applies it to the whole chat surface; the stepper only renders when
+ * the zoom props are provided. Clicking the % label resets to 100.
  */
 
 import { Button } from "@nous-research/ui/ui/components/button";
-import { ArrowUp, ChevronDown, Square } from "lucide-react";
+import { ArrowUp, ChevronDown, Square, ZoomIn, ZoomOut } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ModelPickerDialog } from "@/components/ModelPickerDialog";
@@ -27,6 +31,13 @@ interface Props {
   onStop(): void;
   /** Shown under the composer — the read-only posture hint. */
   hint?: string;
+  /** v1.3 zoom stepper — all-or-nothing: render only when provided. */
+  zoomPct?: number;
+  canZoomIn?: boolean;
+  canZoomOut?: boolean;
+  onZoomIn?(): void;
+  onZoomOut?(): void;
+  onZoomReset?(): void;
 }
 
 export function ThreadComposer({
@@ -37,6 +48,12 @@ export function ThreadComposer({
   onSend,
   onStop,
   hint,
+  zoomPct,
+  canZoomIn,
+  canZoomOut,
+  onZoomIn,
+  onZoomOut,
+  onZoomReset,
 }: Props) {
   const [text, setText] = useState("");
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -57,6 +74,8 @@ export function ThreadComposer({
     onSend(trimmed);
     setText("");
   }, [text, disabled, running, onSend]);
+
+  const zoomControls = zoomPct != null && onZoomIn && onZoomOut;
 
   return (
     <div className="mx-auto w-full max-w-4xl px-1 pb-[max(1rem,env(safe-area-inset-bottom,0px))]">
@@ -110,13 +129,66 @@ export function ThreadComposer({
             <span className="truncate text-xs text-[var(--ds-green)]">{modelNotice}</span>
           )}
 
+          {zoomControls && (
+            <span className="ml-auto flex shrink-0 items-center gap-0.5">
+              <button
+                type="button"
+                onClick={onZoomOut}
+                disabled={!canZoomOut}
+                aria-label="Decrease text size"
+                title="Decrease text size"
+                className={cn(
+                  "flex h-6 w-6 cursor-pointer items-center justify-center rounded",
+                  "border-0 bg-transparent text-text-tertiary",
+                  "hover:bg-midground/5 hover:text-text-secondary",
+                  "disabled:cursor-default disabled:opacity-35",
+                )}
+              >
+                <ZoomOut className="h-3.5 w-3.5" />
+              </button>
+              {zoomPct !== 100 && (
+                <button
+                  type="button"
+                  onClick={onZoomReset}
+                  aria-label="Reset text size"
+                  title="Reset to 100%"
+                  className={cn(
+                    "cursor-pointer rounded border-0 bg-transparent px-1 py-0.5",
+                    "font-mono-ui text-[0.6875rem] tabular-nums text-text-tertiary",
+                    "hover:text-text-secondary",
+                  )}
+                >
+                  {zoomPct}%
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={onZoomIn}
+                disabled={!canZoomIn}
+                aria-label="Increase text size"
+                title="Increase text size"
+                className={cn(
+                  "flex h-6 w-6 cursor-pointer items-center justify-center rounded",
+                  "border-0 bg-transparent text-text-tertiary",
+                  "hover:bg-midground/5 hover:text-text-secondary",
+                  "disabled:cursor-default disabled:opacity-35",
+                )}
+              >
+                <ZoomIn className="h-3.5 w-3.5" />
+              </button>
+            </span>
+          )}
+
           {running ? (
             <Button
               size="icon"
               onClick={onStop}
               aria-label="Stop generating"
               title="Stop generating"
-              className="ml-auto h-8 w-8 shrink-0 !bg-midground/10 !text-text-primary hover:!bg-midground/20"
+              className={cn(
+                "h-8 w-8 shrink-0 !bg-midground/10 !text-text-primary hover:!bg-midground/20",
+                zoomControls ? "ml-1" : "ml-auto",
+              )}
             >
               <Square className="h-3.5 w-3.5" />
             </Button>
@@ -127,7 +199,8 @@ export function ThreadComposer({
               disabled={disabled || !text.trim()}
               aria-label="Send message"
               className={cn(
-                "ml-auto h-8 w-8 shrink-0",
+                "h-8 w-8 shrink-0",
+                zoomControls ? "ml-1" : "ml-auto",
                 "!bg-[var(--ds-accent)] !text-white hover:!bg-[var(--ds-accent-hover)]",
                 "disabled:opacity-40",
               )}

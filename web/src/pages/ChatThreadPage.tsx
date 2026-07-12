@@ -10,12 +10,15 @@
  *
  * `?resume=<session id>` opens an existing conversation; the page is keyed
  * on that param by the route wrapper so switching sessions remounts cleanly.
+ *
+ * v1.3: the whole chat surface scales via CSS `zoom` (composer stepper,
+ * 90–140%, persisted in localStorage) — font AND spacing relax together.
  */
 
 import { Spinner } from "@nous-research/ui/ui/components/spinner";
 import { Button } from "@nous-research/ui/ui/components/button";
 import { AlertCircle } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useSearchParams } from "react-router-dom";
 
 import { Markdown } from "@/components/Markdown";
@@ -30,6 +33,11 @@ import {
 } from "@/hooks/useChatThread";
 
 const RENDER_BUDGET = 250;
+
+// v1.3 zoom steps. CSS `zoom` scales text AND spacing together — the
+// "too small and too dense" complaint in one knob. Persisted per browser.
+const ZOOM_STEPS = [0.9, 1, 1.1, 1.25, 1.4];
+const ZOOM_KEY = "digispark-chat-zoom";
 
 function ReasoningDisclosure({
   text,
@@ -121,6 +129,31 @@ function ChatThread({ resumeId }: { resumeId: string | null }) {
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const stickRef = useRef(true);
 
+  // v1.3 zoom — index into ZOOM_STEPS, persisted per browser.
+  const [zoomIdx, setZoomIdx] = useState(() => {
+    try {
+      const v = Number(window.localStorage.getItem(ZOOM_KEY));
+      const idx = ZOOM_STEPS.indexOf(v);
+      return idx >= 0 ? idx : ZOOM_STEPS.indexOf(1);
+    } catch {
+      return ZOOM_STEPS.indexOf(1);
+    }
+  });
+  const zoom = ZOOM_STEPS[zoomIdx];
+  const setZoom = useCallback((idx: number) => {
+    const clamped = Math.min(ZOOM_STEPS.length - 1, Math.max(0, idx));
+    setZoomIdx(clamped);
+    try {
+      window.localStorage.setItem(ZOOM_KEY, String(ZOOM_STEPS[clamped]));
+    } catch { /* private browsing */ }
+  }, []);
+  const zoomIn = useCallback(() => setZoom(zoomIdx + 1), [setZoom, zoomIdx]);
+  const zoomOut = useCallback(() => setZoom(zoomIdx - 1), [setZoom, zoomIdx]);
+  const zoomReset = useCallback(
+    () => setZoom(ZOOM_STEPS.indexOf(1)),
+    [setZoom],
+  );
+
   // Model pill before any session exists: read the effective config model.
   useEffect(() => {
     if (thread.info.model) return;
@@ -162,7 +195,7 @@ function ChatThread({ resumeId }: { resumeId: string | null }) {
   const empty = thread.items.length === 0;
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col" style={{ zoom }}>
       {/* Connection / resume problems — quiet, non-modal */}
       {disconnected && (
         <div className="mx-auto mt-2 w-full max-w-4xl rounded border border-warning/50 bg-warning/10 px-3 py-1.5 text-xs text-warning">
@@ -242,6 +275,12 @@ function ChatThread({ resumeId }: { resumeId: string | null }) {
         onSend={(t) => void thread.send(t)}
         onStop={() => void thread.interrupt()}
         hint="Read-only analyst — replies are staged to Outlook Drafts, never sent."
+        zoomPct={Math.round(zoom * 100)}
+        canZoomIn={zoomIdx < ZOOM_STEPS.length - 1}
+        canZoomOut={zoomIdx > 0}
+        onZoomIn={zoomIn}
+        onZoomOut={zoomOut}
+        onZoomReset={zoomReset}
       />
     </div>
   );
