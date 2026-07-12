@@ -29,7 +29,7 @@ export function SidebarFooter({ status }: SidebarFooterProps) {
       )}
     >
       <Typography
-        className="font-mono-ui text-xs tabular-nums tracking-[0.08em] text-text-tertiary lowercase"
+        className="sb-keep-mono font-mono-ui text-xs tabular-nums tracking-[0.08em] text-text-tertiary lowercase"
       >
         {status?.version != null ? `v${status.version}` : "—"}
       </Typography>

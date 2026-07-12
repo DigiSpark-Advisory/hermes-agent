@@ -125,7 +125,7 @@ export function AuthWidget({ className }: AuthWidgetProps) {
       aria-label={`Logged in as ${label}`}
     >
       <div className="flex min-w-0 flex-col">
-        <span className="truncate font-mono text-foreground/90" title={me.user_id}>
+        <span className="sb-keep-mono truncate font-mono text-foreground/90" title={me.user_id}>
           {label}
         </span>
         <span className="truncate text-muted-foreground/70">

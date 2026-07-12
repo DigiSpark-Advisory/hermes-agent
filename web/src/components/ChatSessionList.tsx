@@ -204,16 +204,18 @@ export function ChatSessionList({
               aria-current={isActive ? "true" : undefined}
               className={cn(
                 "flex-col items-start gap-0.5 rounded px-2 py-1.5",
-                "normal-case tracking-normal",
+                // font-sans is load-bearing: the DS ListItem styles rows in
+                // its own mono face; the utility must win (DigiSpark v1.2).
+                "font-sans normal-case tracking-normal",
                 isActive
                   ? "bg-primary/10 text-foreground border-l-2 border-primary"
                   : "text-text-secondary hover:bg-midground/5 hover:text-foreground",
               )}
             >
-              <span className="w-full truncate text-sm font-medium">
+              <span className="w-full truncate font-sans text-sm font-medium">
                 {rowLabel(s, t.sessions.untitledSession)}
               </span>
-              <span className="flex w-full items-center gap-1.5 text-[0.6875rem] text-text-tertiary">
+              <span className="flex w-full items-center gap-1.5 font-sans text-[0.6875rem] text-text-tertiary">
                 <span>{timeAgo(s.last_active)}</span>
                 {s.message_count > 0 && (
                   <>
