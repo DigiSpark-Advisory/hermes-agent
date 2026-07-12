@@ -13,8 +13,10 @@
  *                 and a jump to the Sessions power page.
  *
  * The Scheduled card probes a few plausible cron API method names and
- * renders ONLY if one returns a recognisable job list — fails soft to
- * hidden, so bundle builds never depend on the cron API's exact shape.
+ * renders ONLY if one returns a recognisable job list. LESSON (v1.3.1,
+ * React #31 crash on first deploy): cron job fields — notably `schedule`,
+ * which is a {kind, expr, display} object — must NEVER be rendered
+ * directly; everything passes through string extractors below.
  */
 
 import { Spinner } from "@nous-research/ui/ui/components/spinner";
@@ -124,15 +126,32 @@ function downloadDataUrl(dataUrl: string, name: string) {
   link.remove();
 }
 
-interface CronJobLike {
-  name?: string;
-  id?: string;
-  schedule?: string;
-  cron?: string;
-  next_run?: number | string;
-  last_run?: number | string;
-  last_status?: string;
-  enabled?: boolean;
+type CronJobLike = Record<string, unknown>;
+
+/** Only ever returns a string — the React #31 guard. */
+function stringOr(value: unknown, fallback = ""): string {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return fallback;
+}
+
+/** Schedule may be a string OR an object like {kind, expr, display}. */
+function scheduleLabel(job: CronJobLike): string {
+  for (const field of ["schedule", "cron"]) {
+    const s = job[field];
+    if (typeof s === "string") return s;
+    if (s && typeof s === "object") {
+      const o = s as Record<string, unknown>;
+      for (const k of ["display", "expr", "cron", "expression"]) {
+        if (typeof o[k] === "string") return o[k] as string;
+      }
+    }
+  }
+  return "";
+}
+
+function jobLabel(job: CronJobLike): string {
+  return stringOr(job.name) || stringOr(job.id) || "Scheduled job";
 }
 
 /** Best-effort cron probe — renders nothing if no known method matches. */
@@ -228,20 +247,25 @@ export function WorkspaceRail({
   }, [open, loadVault]);
 
   const copyId = useCallback(() => {
-    if (!sessionId) return;
-    void navigator.clipboard?.writeText(sessionId).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    });
+    // navigator.clipboard is undefined on non-secure origins (the LAN
+    // dashboard is plain HTTP) — guard, don't throw.
+    if (!sessionId || !navigator.clipboard) return;
+    void navigator.clipboard.writeText(sessionId).then(
+      () => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      },
+      () => undefined,
+    );
   }, [sessionId]);
 
-  const digestJob = useMemo(
-    () =>
-      cronJobs?.find((j) =>
-        `${j.name ?? ""} ${j.id ?? ""}`.toLowerCase().includes("digest"),
-      ) ?? cronJobs?.[0] ?? null,
-    [cronJobs],
-  );
+  const digestJob = useMemo(() => {
+    if (!cronJobs?.length) return null;
+    return (
+      cronJobs.find((j) => jobLabel(j).toLowerCase().includes("digest")) ??
+      cronJobs[0]
+    );
+  }, [cronJobs]);
 
   if (!open) {
     return (
@@ -258,6 +282,10 @@ export function WorkspaceRail({
       </div>
     );
   }
+
+  const scheduleText = digestJob ? scheduleLabel(digestJob) : "";
+  const lastStatusText = digestJob ? stringOr(digestJob.last_status) : "";
+  const jobEnabled = digestJob ? digestJob.enabled !== false : true;
 
   return (
     <aside
@@ -397,19 +425,18 @@ export function WorkspaceRail({
                     <span
                       className={cn(
                         "h-1.5 w-1.5 rounded-full",
-                        digestJob.enabled === false ? "bg-muted-foreground" : "bg-[var(--ds-green)]",
+                        jobEnabled ? "bg-[var(--ds-green)]" : "bg-muted-foreground",
                       )}
                     />
-                    <span className="truncate font-semibold">
-                      {digestJob.name ?? digestJob.id ?? "Scheduled job"}
-                    </span>
+                    <span className="truncate font-semibold">{jobLabel(digestJob)}</span>
                   </div>
-                  <div className="mt-0.5 pl-3 text-[0.625rem] text-text-tertiary">
-                    {(digestJob.schedule ?? digestJob.cron ?? "") && (
-                      <span className="font-mono-ui">{digestJob.schedule ?? digestJob.cron}</span>
-                    )}
-                    {digestJob.last_status && <span> · last: {digestJob.last_status}</span>}
-                  </div>
+                  {(scheduleText || lastStatusText) && (
+                    <div className="mt-0.5 pl-3 text-[0.625rem] text-text-tertiary">
+                      {scheduleText && <span className="font-mono-ui">{scheduleText}</span>}
+                      {scheduleText && lastStatusText && <span> · </span>}
+                      {lastStatusText && <span>last: {lastStatusText}</span>}
+                    </div>
+                  )}
                 </div>
               </>
             )}
@@ -477,7 +504,7 @@ export function WorkspaceRail({
                 <span className="min-w-0 flex-1 truncate font-mono-ui text-[0.6875rem]" title={sessionId ?? undefined}>
                   {sessionId ?? "not started — send a message"}
                 </span>
-                {sessionId && (
+                {sessionId && Boolean(navigator.clipboard) && (
                   <button
                     type="button"
                     onClick={copyId}
