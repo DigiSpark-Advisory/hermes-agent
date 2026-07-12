@@ -130,6 +130,14 @@
   font-family: var(--theme-font-display) !important;
 }
 
+/* The app sidebar is a sans surface (wireframe): DS ListItem rows and the
+   System status readouts opt into mono faces — route them to the sans
+   stack. `.sb-keep-mono` marks the two footer chips (version, user id)
+   that deliberately keep the mono voice. */
+#app-sidebar :is(.font-mono, .font-mono-ui):not(.sb-keep-mono) {
+  font-family: var(--theme-font-sans);
+}
+
 /* Theme tokens cascade into the document root so every descendant inherits
    the font stack, base size, and letter spacing without explicit calls. */
 html {
