@@ -98,6 +98,38 @@
   --series-output-token: #1f8a65;
 }
 
+/* ------------------------------------------------------------------ */
+/* DigiSpark v1.2 — retire the Nous brand faces inside DS components.  */
+/* The DS ships its own font variables + utility classes (Collapse,    */
+/* Rules Compressed/Expanded, Mondwest, Courier Prime) which           */
+/* reintroduce the upstream look inside ListItem/Typography/Badge/the  */
+/* page-header h1 REGARDLESS of the active dashboard theme — the       */
+/* "mashup" symptom: typewriter session rows, serif display headings.  */
+/* Route every slot through the theme stacks. Declared AFTER the DS    */
+/* globals import so these :root values win the cascade.               */
+:root {
+  --font-collapse: var(--theme-font-sans);
+  --font-rules-compressed: var(--theme-font-sans);
+  --font-rules-expanded: var(--theme-font-sans);
+  --font-mondwest: var(--theme-font-sans);
+  --font-courier: var(--theme-font-mono);
+  --font-courier-prime: var(--theme-font-mono);
+}
+.font-collapse,
+.font-rules-compressed,
+.font-rules-expanded,
+.font-mondwest,
+.font-expanded,
+.font-compressed {
+  font-family: var(--theme-font-sans) !important;
+}
+.font-courier {
+  font-family: var(--theme-font-mono) !important;
+}
+.text-display {
+  font-family: var(--theme-font-display) !important;
+}
+
 /* Theme tokens cascade into the document root so every descendant inherits
    the font stack, base size, and letter spacing without explicit calls. */
 html {
@@ -254,4 +286,3 @@ code { font-size: 0.875rem; }
   background: repeating-conic-gradient(currentColor 0% 25%, #0000 0% 50%) 0 0 /
     2px 2px;
 }
-

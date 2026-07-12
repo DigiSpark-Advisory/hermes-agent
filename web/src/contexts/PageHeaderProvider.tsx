@@ -51,6 +51,10 @@ export function PageHeaderProvider({
   return (
     <PageHeaderContext.Provider value={value}>
       <div className="flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden">
+        {/* DigiSpark v1.2: the thread client (/chat) is self-contained — no
+            banner header per the approved wireframe. Every other route
+            (including /terminal) keeps its title bar. */}
+        {!isChatRoute && (
         <header
           className={cn(
             "z-1 w-full shrink-0",
@@ -64,9 +68,7 @@ export function PageHeaderProvider({
           <div
             className={cn(
               "flex w-full min-w-0 flex-1 gap-3 px-3 sm:h-full sm:gap-3 sm:px-6",
-              isChatRoute
-                ? "flex-row items-center"
-                : "flex-col justify-center sm:flex-row sm:items-center",
+              "flex-col justify-center sm:flex-row sm:items-center",
             )}
           >
             <div
@@ -109,9 +111,7 @@ export function PageHeaderProvider({
               <div
                 className={cn(
                   "flex min-w-0 sm:max-w-md sm:flex-1",
-                  isChatRoute
-                    ? "w-auto shrink-0 justify-end"
-                    : "w-full justify-start sm:justify-end",
+                  "w-full justify-start sm:justify-end",
                 )}
               >
                 {end}
@@ -119,6 +119,7 @@ export function PageHeaderProvider({
             ) : null}
           </div>
         </header>
+        )}
 
         <main
           className={cn(
