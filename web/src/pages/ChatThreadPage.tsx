@@ -11,8 +11,10 @@
  * `?resume=<session id>` opens an existing conversation; the page is keyed
  * on that param by the route wrapper so switching sessions remounts cleanly.
  *
- * v1.3: the whole chat surface scales via CSS `zoom` (composer stepper,
- * 90–140%, persisted in localStorage) — font AND spacing relax together.
+ * v1.3: (a) the whole chat surface scales via CSS `zoom` (composer stepper,
+ * 90–140%, persisted); (b) three-column layout — the thread column plus the
+ * WorkspaceRail (Vault + Session tabs) on xl+ screens, collapsible, state
+ * persisted. The rail hides itself below 1280px so the thread keeps priority.
  */
 
 import { Spinner } from "@nous-research/ui/ui/components/spinner";
@@ -25,6 +27,7 @@ import { Markdown } from "@/components/Markdown";
 import { PromptBar } from "@/components/thread/PromptBar";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
 import { ToolChipGroup } from "@/components/thread/ToolChip";
+import { WorkspaceRail } from "@/components/thread/WorkspaceRail";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import {
@@ -38,6 +41,7 @@ const RENDER_BUDGET = 250;
 // "too small and too dense" complaint in one knob. Persisted per browser.
 const ZOOM_STEPS = [0.9, 1, 1.1, 1.25, 1.4];
 const ZOOM_KEY = "digispark-chat-zoom";
+const RAIL_KEY = "digispark-rail-open";
 
 function ReasoningDisclosure({
   text,
@@ -154,6 +158,24 @@ function ChatThread({ resumeId }: { resumeId: string | null }) {
     [setZoom],
   );
 
+  // v1.3 workspace rail — open by default on xl+, persisted.
+  const [railOpen, setRailOpen] = useState(() => {
+    try {
+      return window.localStorage.getItem(RAIL_KEY) !== "false";
+    } catch {
+      return true;
+    }
+  });
+  const toggleRail = useCallback(() => {
+    setRailOpen((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem(RAIL_KEY, String(next));
+      } catch { /* private browsing */ }
+      return next;
+    });
+  }, []);
+
   // Model pill before any session exists: read the effective config model.
   useEffect(() => {
     if (thread.info.model) return;
@@ -195,92 +217,105 @@ function ChatThread({ resumeId }: { resumeId: string | null }) {
   const empty = thread.items.length === 0;
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col" style={{ zoom }}>
-      {/* Connection / resume problems — quiet, non-modal */}
-      {disconnected && (
-        <div className="mx-auto mt-2 w-full max-w-4xl rounded border border-warning/50 bg-warning/10 px-3 py-1.5 text-xs text-warning">
-          Connection lost — reconnecting…
-          {thread.connectionError ? ` (${thread.connectionError})` : ""}
-        </div>
-      )}
-      {thread.resumeFailed && (
-        <div className="mx-auto mt-2 w-full max-w-4xl rounded border border-destructive/40 bg-destructive/5 px-3 py-1.5 text-xs text-destructive">
-          Couldn't resume this conversation: {thread.resumeFailed}
-        </div>
-      )}
+    <div className="flex min-h-0 min-w-0 flex-1" style={{ zoom }}>
+      {/* Column 2: the thread */}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        {/* Connection / resume problems — quiet, non-modal */}
+        {disconnected && (
+          <div className="mx-auto mt-2 w-full max-w-4xl rounded border border-warning/50 bg-warning/10 px-3 py-1.5 text-xs text-warning">
+            Connection lost — reconnecting…
+            {thread.connectionError ? ` (${thread.connectionError})` : ""}
+          </div>
+        )}
+        {thread.resumeFailed && (
+          <div className="mx-auto mt-2 w-full max-w-4xl rounded border border-destructive/40 bg-destructive/5 px-3 py-1.5 text-xs text-destructive">
+            Couldn't resume this conversation: {thread.resumeFailed}
+          </div>
+        )}
 
-      {/* Thread */}
-      <div
-        ref={scrollerRef}
-        onScroll={onScroll}
-        className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden"
-      >
-        <div className="mx-auto flex w-full max-w-4xl flex-col gap-5 px-1 py-6">
-          {hiddenCount > 0 && (
-            <div className="text-center">
-              <Button size="sm" ghost onClick={() => setShowAll(true)}
-                className="normal-case tracking-normal text-text-tertiary">
-                Show {hiddenCount} earlier
-              </Button>
-            </div>
-          )}
-
-          {empty && !connecting && (
-            <div className="flex flex-col items-center gap-1 py-24 text-center">
-              <div className="text-lg font-semibold text-text-primary">
-                {resumeId ? "Loading conversation…" : "What's on deck?"}
+        {/* Thread */}
+        <div
+          ref={scrollerRef}
+          onScroll={onScroll}
+          className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden"
+        >
+          <div className="mx-auto flex w-full max-w-4xl flex-col gap-5 px-1 py-6">
+            {hiddenCount > 0 && (
+              <div className="text-center">
+                <Button size="sm" ghost onClick={() => setShowAll(true)}
+                  className="normal-case tracking-normal text-text-tertiary">
+                  Show {hiddenCount} earlier
+                </Button>
               </div>
-              <div className="text-sm text-text-tertiary">
-                Inbox triage, the news feeds, or a research question.
+            )}
+
+            {empty && !connecting && (
+              <div className="flex flex-col items-center gap-1 py-24 text-center">
+                <div className="text-lg font-semibold text-text-primary">
+                  {resumeId ? "Loading conversation…" : "What's on deck?"}
+                </div>
+                <div className="text-sm text-text-tertiary">
+                  Inbox triage, the news feeds, or a research question.
+                </div>
               </div>
-            </div>
-          )}
-          {empty && connecting && (
-            <div className="flex items-center justify-center gap-2 py-24 text-sm text-text-tertiary">
-              <Spinner aria-label="connecting" /> Connecting to the agent…
-            </div>
-          )}
+            )}
+            {empty && connecting && (
+              <div className="flex items-center justify-center gap-2 py-24 text-sm text-text-tertiary">
+                <Spinner aria-label="connecting" /> Connecting to the agent…
+              </div>
+            )}
 
-          {visibleItems.map((item) => (
-            <ThreadItemView key={item.id} item={item} />
-          ))}
+            {visibleItems.map((item) => (
+              <ThreadItemView key={item.id} item={item} />
+            ))}
 
-          {/* Live status: spinner + optional status line while working */}
-          {thread.running && (
-            <div className="flex items-center gap-2 text-xs text-text-tertiary">
-              <Spinner aria-label="working" className="text-[var(--ds-accent)]" />
-              <span>{thread.statusLine ?? "Working…"}</span>
-            </div>
-          )}
+            {/* Live status: spinner + optional status line while working */}
+            {thread.running && (
+              <div className="flex items-center gap-2 text-xs text-text-tertiary">
+                <Spinner aria-label="working" className="text-[var(--ds-accent)]" />
+                <span>{thread.statusLine ?? "Working…"}</span>
+              </div>
+            )}
+          </div>
         </div>
+
+        {/* Blocking prompt (approval / clarify / secret) above the composer */}
+        {thread.prompt && (
+          <div className="mx-auto w-full max-w-4xl px-1 pb-2">
+            <PromptBar
+              prompt={thread.prompt}
+              onApproval={(c) => void thread.respondApproval(c)}
+              onClarify={(a) => void thread.respondClarify(a)}
+              onSecret={(v) => void thread.respondSecret(v)}
+            />
+          </div>
+        )}
+
+        <ThreadComposer
+          disabled={thread.connection !== "open"}
+          running={thread.running}
+          model={thread.info.model ?? fallbackModel}
+          toolCount={thread.info.toolCount}
+          onSend={(t) => void thread.send(t)}
+          onStop={() => void thread.interrupt()}
+          hint="Read-only analyst — replies are staged to Outlook Drafts, never sent."
+          zoomPct={Math.round(zoom * 100)}
+          canZoomIn={zoomIdx < ZOOM_STEPS.length - 1}
+          canZoomOut={zoomIdx > 0}
+          onZoomIn={zoomIn}
+          onZoomOut={zoomOut}
+          onZoomReset={zoomReset}
+        />
       </div>
 
-      {/* Blocking prompt (approval / clarify / secret) above the composer */}
-      {thread.prompt && (
-        <div className="mx-auto w-full max-w-4xl px-1 pb-2">
-          <PromptBar
-            prompt={thread.prompt}
-            onApproval={(c) => void thread.respondApproval(c)}
-            onClarify={(a) => void thread.respondClarify(a)}
-            onSecret={(v) => void thread.respondSecret(v)}
-          />
-        </div>
-      )}
-
-      <ThreadComposer
-        disabled={thread.connection !== "open"}
+      {/* Column 3: workspace rail (xl+ only; component handles collapse) */}
+      <WorkspaceRail
+        open={railOpen}
+        onToggle={toggleRail}
+        info={thread.info}
+        sessionId={thread.sessionId}
+        connection={thread.connection}
         running={thread.running}
-        model={thread.info.model ?? fallbackModel}
-        toolCount={thread.info.toolCount}
-        onSend={(t) => void thread.send(t)}
-        onStop={() => void thread.interrupt()}
-        hint="Read-only analyst — replies are staged to Outlook Drafts, never sent."
-        zoomPct={Math.round(zoom * 100)}
-        canZoomIn={zoomIdx < ZOOM_STEPS.length - 1}
-        canZoomOut={zoomIdx > 0}
-        onZoomIn={zoomIn}
-        onZoomOut={zoomOut}
-        onZoomReset={zoomReset}
       />
     </div>
   );

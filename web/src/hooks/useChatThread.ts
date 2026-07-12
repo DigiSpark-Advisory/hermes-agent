@@ -20,7 +20,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { GatewayClient, type ConnectionState, type GatewayEvent } from "@/lib/gatewayClient";
 
-// ── Thread state types ───────────────────────────────────────────────────────
+// ── Thread state types ──────────────────────────────────────────────────────────────
 
 export interface ThreadToolCall {
   toolId: string;
@@ -68,6 +68,8 @@ export interface ThreadSessionInfo {
   running?: boolean;
   title?: string;
   toolCount?: number;
+  /** v1.3: tool names from the session.info tools map (rail Session tab). */
+  toolNames?: string[];
   reasoningEffort?: string;
   cwd?: string;
 }
@@ -90,7 +92,7 @@ interface SessionCreateResponse {
   info?: Record<string, unknown>;
 }
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// ── Helpers ──────────────────────────────────────────────────────────────────────────
 
 let idCounter = 0;
 const nextId = () => `t${++idCounter}`;
@@ -98,6 +100,7 @@ const nextId = () => `t${++idCounter}`;
 function infoFromPayload(payload: Record<string, unknown> | undefined): ThreadSessionInfo {
   const p = payload ?? {};
   const tools = p.tools;
+  const toolsIsMap = Boolean(tools && typeof tools === "object");
   return {
     model: typeof p.model === "string" ? p.model : undefined,
     provider: typeof p.provider === "string" ? p.provider : undefined,
@@ -106,8 +109,8 @@ function infoFromPayload(payload: Record<string, unknown> | undefined): ThreadSe
     reasoningEffort:
       typeof p.reasoning_effort === "string" ? p.reasoning_effort : undefined,
     cwd: typeof p.cwd === "string" ? p.cwd : undefined,
-    toolCount:
-      tools && typeof tools === "object" ? Object.keys(tools as object).length : undefined,
+    toolCount: toolsIsMap ? Object.keys(tools as object).length : undefined,
+    toolNames: toolsIsMap ? Object.keys(tools as object).sort() : undefined,
   };
 }
 
@@ -141,7 +144,7 @@ function backfillToItems(messages: GatewayTranscriptMessage[]): ThreadItem[] {
   return items;
 }
 
-// ── The hook ─────────────────────────────────────────────────────────────────
+// ── The hook ───────────────────────────────────────────────────────────────────────
 
 export interface UseChatThread {
   items: ThreadItem[];
@@ -186,7 +189,7 @@ export function useChatThread(resumeId: string | null): UseChatThread {
     setSessionId(id);
   }, []);
 
-  // ── Event reducers (operate on the items array immutably) ────────────────
+  // ── Event reducers (operate on the items array immutably) ────────────────────────
 
   const appendAssistantDelta = useCallback((text: string) => {
     if (!text) return;
@@ -317,7 +320,7 @@ export function useChatThread(resumeId: string | null): UseChatThread {
     });
   }, []);
 
-  // ── Gateway lifecycle ─────────────────────────────────────────────────────
+  // ── Gateway lifecycle ─────────────────────────────────────────────────────────────
 
   useEffect(() => {
     mountedRef.current = true;
@@ -552,7 +555,7 @@ export function useChatThread(resumeId: string | null): UseChatThread {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── Actions ───────────────────────────────────────────────────────────────
+  // ── Actions ─────────────────────────────────────────────────────────────────────────
 
   const send = useCallback(
     async (text: string) => {
