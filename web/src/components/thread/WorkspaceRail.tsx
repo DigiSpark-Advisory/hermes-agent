@@ -12,6 +12,17 @@
  *                 connection state, cwd, session id (copy), toolset list,
  *                 and a jump to the Sessions power page.
  *
+ * v1.3.2 (vault v2 folder support, wireframe-approved 2026-07-12 evening):
+ * the vault is now class folders + year archive
+ * (deliverables/<class>/YYYY/…, client/<slug>/…), so the flat listing is
+ * replaced by a BOUNDED two-level walk — class dirs, then at most the 3
+ * most recent subdirs per class (year folders / client slugs). Artifacts
+ * render under collapsible class groups (collapse state persisted per
+ * browser), newest-first within a group, groups ordered by their newest
+ * artifact, max 8 cards per group. Year folders are flattened out of the
+ * display (the date is in the filename); client work groups per slug.
+ * Stray files at the deliverables root land in an "Other" group.
+ *
  * The Scheduled card probes a few plausible cron API method names and
  * renders ONLY if one returns a recognisable job list. LESSON (v1.3.1,
  * React #31 crash on first deploy): cron job fields — notably `schedule`,
@@ -23,6 +34,8 @@ import { Spinner } from "@nous-research/ui/ui/components/spinner";
 import {
   AlertCircle,
   Check,
+  ChevronDown,
+  ChevronRight,
   ClipboardCopy,
   ExternalLink,
   PanelRightClose,
@@ -41,7 +54,17 @@ const VAULT_DIR = "/opt/data/vault/deliverables";
 const ERRORS_DIR = "/opt/data/vault/_render/errors";
 const STATUS_FILE = "/opt/data/vault/_render/status.md";
 const POLL_MS = 20_000;
-const MAX_ARTIFACTS = 12;
+const MAX_PER_GROUP = 8;
+const MAX_SUBDIRS_PER_CLASS = 3;
+const COLLAPSE_KEY = "ds.rail.vault.collapsed";
+
+const CLASS_LABELS: Record<string, string> = {
+  "news-digest": "News digest",
+  triage: "Triage",
+  research: "Research",
+  ops: "Ops",
+  client: "Client",
+};
 
 interface Artifact {
   stem: string;
@@ -51,6 +74,13 @@ interface Artifact {
   outputs: { ext: string; path: string; name: string }[];
   expectedExts: string[];
   state: "rendering" | "rendered" | "error";
+}
+
+interface VaultGroup {
+  key: string; // "news-digest" | "client/acme-defense" | "other" | …
+  label: string;
+  artifacts: Artifact[];
+  hasError: boolean;
 }
 
 function decodeDataUrl(dataUrl: string): string {
@@ -71,10 +101,11 @@ function relTime(unixSeconds: number): string {
   return `${Math.round(d / 86400)}d ago`;
 }
 
-/** Group a flat deliverables listing into artifacts (source + outputs). */
+/** Group a flat file listing into artifacts (source + outputs). */
 function groupArtifacts(
   entries: ManagedFileEntry[],
   errorNames: Set<string>,
+  cap = MAX_PER_GROUP,
 ): Artifact[] {
   const files = entries.filter((e) => !e.is_directory);
   const byName = new Map(files.map((f) => [f.name, f]));
@@ -114,7 +145,114 @@ function groupArtifacts(
     });
   }
   arts.sort((a, b) => b.sourceMtime - a.sourceMtime);
-  return arts.slice(0, MAX_ARTIFACTS);
+  return arts.slice(0, cap);
+}
+
+/** listFiles that swallows errors — used for OPTIONAL subdirectories only. */
+async function listDirSafe(path: string): Promise<ManagedFileEntry[]> {
+  try {
+    const res = await api.listFiles(path);
+    return res.entries;
+  } catch {
+    return [];
+  }
+}
+
+function makeGroup(
+  key: string,
+  label: string,
+  files: ManagedFileEntry[],
+  errorNames: Set<string>,
+): VaultGroup {
+  const artifacts = groupArtifacts(files, errorNames);
+  return {
+    key,
+    label,
+    artifacts,
+    hasError: artifacts.some((a) => a.state === "error"),
+  };
+}
+
+/**
+ * Bounded walk of the vault v2 tree: class dirs at the root, then at most
+ * MAX_SUBDIRS_PER_CLASS newest subdirs each (year folders sort descending
+ * by name; client slugs get one group per slug). Never throws — subdir
+ * listing failures degrade to an empty group.
+ */
+async function gatherGroups(
+  rootEntries: ManagedFileEntry[],
+  errorNames: Set<string>,
+): Promise<VaultGroup[]> {
+  const groups: VaultGroup[] = [];
+  const rootFiles = rootEntries.filter((e) => !e.is_directory);
+  if (rootFiles.length) {
+    groups.push(makeGroup("other", "Other", rootFiles, errorNames));
+  }
+  const classDirs = rootEntries.filter((e) => e.is_directory);
+  for (const dir of classDirs) {
+    const entries = await listDirSafe(`${VAULT_DIR}/${dir.name}`);
+    const files = entries.filter((e) => !e.is_directory);
+    const subdirs = entries
+      .filter((e) => e.is_directory)
+      .sort((a, b) => b.name.localeCompare(a.name))
+      .slice(0, MAX_SUBDIRS_PER_CLASS);
+    if (dir.name === "client") {
+      // client/<slug>/ — one group per client, files flat inside
+      for (const sub of subdirs) {
+        const subFiles = (
+          await listDirSafe(`${VAULT_DIR}/client/${sub.name}`)
+        ).filter((e) => !e.is_directory);
+        if (subFiles.length) {
+          groups.push(
+            makeGroup(
+              `client/${sub.name}`,
+              `Client · ${sub.name}`,
+              subFiles,
+              errorNames,
+            ),
+          );
+        }
+      }
+      if (files.length) {
+        groups.push(makeGroup("client", "Client", files, errorNames));
+      }
+    } else {
+      // <class>/YYYY/ — flatten year folders into the class group
+      let all = files;
+      for (const sub of subdirs) {
+        const subFiles = (
+          await listDirSafe(`${VAULT_DIR}/${dir.name}/${sub.name}`)
+        ).filter((e) => !e.is_directory);
+        all = all.concat(subFiles);
+      }
+      if (all.length) {
+        groups.push(
+          makeGroup(
+            dir.name,
+            CLASS_LABELS[dir.name] ?? dir.name,
+            all,
+            errorNames,
+          ),
+        );
+      }
+    }
+  }
+  // Groups ordered by their newest artifact.
+  groups.sort(
+    (a, b) =>
+      (b.artifacts[0]?.sourceMtime ?? 0) - (a.artifacts[0]?.sourceMtime ?? 0),
+  );
+  return groups.filter((g) => g.artifacts.length > 0);
+}
+
+function loadCollapsed(): Set<string> {
+  try {
+    const raw = localStorage.getItem(COLLAPSE_KEY);
+    const arr = raw ? (JSON.parse(raw) as unknown) : [];
+    return new Set(Array.isArray(arr) ? arr.filter((x) => typeof x === "string") : []);
+  } catch {
+    return new Set();
+  }
 }
 
 function downloadDataUrl(dataUrl: string, name: string) {
@@ -200,12 +338,27 @@ export function WorkspaceRail({
   running: boolean;
 }) {
   const [tab, setTab] = useState<"vault" | "session">("vault");
-  const [artifacts, setArtifacts] = useState<Artifact[] | null>(null);
+  const [groups, setGroups] = useState<VaultGroup[] | null>(null);
+  const [collapsed, setCollapsed] = useState<Set<string>>(loadCollapsed);
   const [vaultError, setVaultError] = useState<string | null>(null);
   const [heartbeat, setHeartbeat] = useState<string | null>(null);
   const [cronJobs, setCronJobs] = useState<CronJobLike[] | null>(null);
   const [copied, setCopied] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const toggleGroup = useCallback((key: string) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      try {
+        localStorage.setItem(COLLAPSE_KEY, JSON.stringify([...next]));
+      } catch {
+        /* storage unavailable — collapse state just won't persist */
+      }
+      return next;
+    });
+  }, []);
 
   const loadVault = useCallback(async () => {
     try {
@@ -217,7 +370,7 @@ export function WorkspaceRail({
       } catch {
         /* no errors dir yet — fine */
       }
-      setArtifacts(groupArtifacts(listing.entries, errorNames));
+      setGroups(await gatherGroups(listing.entries, errorNames));
       setVaultError(null);
       try {
         const status = await api.readFile(STATUS_FILE);
@@ -336,82 +489,119 @@ export function WorkspaceRail({
                 {vaultError}
               </div>
             )}
-            {artifacts === null && !vaultError && (
+            {groups === null && !vaultError && (
               <div className="flex items-center gap-2 px-1 py-4 text-xs text-text-tertiary">
                 <Spinner aria-label="loading" /> Loading vault…
               </div>
             )}
-            {artifacts?.length === 0 && (
+            {groups?.length === 0 && (
               <div className="px-1 py-4 text-center text-xs text-text-tertiary">
                 No deliverables yet — ask the analyst to stage one.
               </div>
             )}
-            {artifacts?.map((a) => {
-              const badge = STATE_BADGE[a.state];
-              const primary = a.outputs[0];
+            {groups?.map((g) => {
+              const isCollapsed = collapsed.has(g.key);
               return (
-                <button
-                  key={a.sourcePath}
-                  type="button"
-                  onClick={() => {
-                    const target = primary ?? { path: a.sourcePath, name: a.sourceName, ext: "" };
-                    void api
-                      .readFile(target.path)
-                      .then((f) => downloadDataUrl(f.data_url, f.name))
-                      .catch(() => undefined);
-                  }}
-                  title={primary ? `Download ${primary.name}` : `Download ${a.sourceName}`}
-                  className={cn(
-                    "block w-full cursor-pointer rounded-lg border border-current/10 bg-card",
-                    "px-2.5 py-2 text-left shadow-sm hover:bg-midground/4",
+                <div key={g.key}>
+                  <button
+                    type="button"
+                    onClick={() => toggleGroup(g.key)}
+                    aria-expanded={!isCollapsed}
+                    title={isCollapsed ? `Expand ${g.label}` : `Collapse ${g.label}`}
+                    className={cn(
+                      "flex w-full cursor-pointer items-center gap-1 rounded border-0 bg-transparent",
+                      "px-0.5 py-1 text-left font-sans text-[0.625rem] font-semibold uppercase",
+                      "tracking-[0.08em] text-text-secondary hover:text-text-primary",
+                    )}
+                  >
+                    {isCollapsed ? (
+                      <ChevronRight className="h-3 w-3 shrink-0" />
+                    ) : (
+                      <ChevronDown className="h-3 w-3 shrink-0" />
+                    )}
+                    <span className="min-w-0 truncate">{g.label}</span>
+                    <span className="text-text-tertiary">({g.artifacts.length})</span>
+                    {g.hasError && (
+                      <AlertCircle
+                        className="h-3 w-3 shrink-0 text-destructive"
+                        aria-label="A file in this group has a render error"
+                      />
+                    )}
+                  </button>
+                  {!isCollapsed && (
+                    <div className="space-y-2 pt-1">
+                      {g.artifacts.map((a) => {
+                        const badge = STATE_BADGE[a.state];
+                        const primary = a.outputs[0];
+                        return (
+                          <button
+                            key={a.sourcePath}
+                            type="button"
+                            onClick={() => {
+                              const target =
+                                primary ?? { path: a.sourcePath, name: a.sourceName, ext: "" };
+                              void api
+                                .readFile(target.path)
+                                .then((f) => downloadDataUrl(f.data_url, f.name))
+                                .catch(() => undefined);
+                            }}
+                            title={primary ? `Download ${primary.name}` : `Download ${a.sourceName}`}
+                            className={cn(
+                              "block w-full cursor-pointer rounded-lg border border-current/10 bg-card",
+                              "px-2.5 py-2 text-left shadow-sm hover:bg-midground/4",
+                            )}
+                          >
+                            <span className="flex items-center gap-1.5">
+                              <span className="min-w-0 flex-1 truncate font-sans text-xs font-semibold">
+                                {a.stem}
+                              </span>
+                              <span
+                                className={cn(
+                                  "shrink-0 rounded-full px-1.5 py-0.5 text-[0.5625rem] font-bold tracking-[0.04em]",
+                                  badge.cls,
+                                )}
+                              >
+                                {badge.label}
+                              </span>
+                            </span>
+                            <span className="mt-0.5 block text-[0.625rem] text-text-tertiary">
+                              {relTime(a.sourceMtime)}
+                            </span>
+                            <span className="mt-1.5 flex gap-1">
+                              <span className="rounded border border-current/10 px-1 py-px text-[0.5625rem] font-semibold text-text-secondary">
+                                SRC
+                              </span>
+                              {a.expectedExts.map((ext) => {
+                                const present = a.outputs.some((o) => o.ext === ext);
+                                return (
+                                  <span
+                                    key={ext}
+                                    className={cn(
+                                      "rounded border border-current/10 px-1 py-px text-[0.5625rem] font-semibold uppercase",
+                                      present ? "text-text-secondary" : "text-text-tertiary opacity-40",
+                                    )}
+                                  >
+                                    {ext}
+                                  </span>
+                                );
+                              })}
+                              {a.outputs
+                                .filter((o) => !a.expectedExts.includes(o.ext))
+                                .map((o) => (
+                                  <span
+                                    key={o.ext}
+                                    className="rounded border border-current/10 px-1 py-px text-[0.5625rem] font-semibold uppercase text-text-secondary"
+                                  >
+                                    {o.ext}
+                                  </span>
+                                ))}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
                   )}
-                >
-                  <span className="flex items-center gap-1.5">
-                    <span className="min-w-0 flex-1 truncate font-sans text-xs font-semibold">
-                      {a.stem}
-                    </span>
-                    <span
-                      className={cn(
-                        "shrink-0 rounded-full px-1.5 py-0.5 text-[0.5625rem] font-bold tracking-[0.04em]",
-                        badge.cls,
-                      )}
-                    >
-                      {badge.label}
-                    </span>
-                  </span>
-                  <span className="mt-0.5 block text-[0.625rem] text-text-tertiary">
-                    {relTime(a.sourceMtime)}
-                  </span>
-                  <span className="mt-1.5 flex gap-1">
-                    <span className="rounded border border-current/10 px-1 py-px text-[0.5625rem] font-semibold text-text-secondary">
-                      SRC
-                    </span>
-                    {a.expectedExts.map((ext) => {
-                      const present = a.outputs.some((o) => o.ext === ext);
-                      return (
-                        <span
-                          key={ext}
-                          className={cn(
-                            "rounded border border-current/10 px-1 py-px text-[0.5625rem] font-semibold uppercase",
-                            present ? "text-text-secondary" : "text-text-tertiary opacity-40",
-                          )}
-                        >
-                          {ext}
-                        </span>
-                      );
-                    })}
-                    {a.outputs
-                      .filter((o) => !a.expectedExts.includes(o.ext))
-                      .map((o) => (
-                        <span
-                          key={o.ext}
-                          className="rounded border border-current/10 px-1 py-px text-[0.5625rem] font-semibold uppercase text-text-secondary"
-                        >
-                          {o.ext}
-                        </span>
-                      ))}
-                  </span>
-                </button>
+                </div>
               );
             })}
 
