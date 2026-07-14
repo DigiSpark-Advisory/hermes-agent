@@ -33,6 +33,19 @@
  * projects once a class had >3 subdirs); now mtime desc (name desc as
  * tiebreak/fallback) with the cap raised to 6.
  *
+ * v1.3.4 (pin/hide, 2026-07-14): as projects accumulate the rail needs
+ * curation, so every group header gains two controls — PIN (pinned groups
+ * sort first, and pinned project subdirs are always walked without
+ * consuming a MAX_SUBDIRS_PER_CLASS slot) and HIDE (the group leaves the
+ * rail; the cap refills from the remaining subdirs; hidden subdirs are not
+ * even fetched). Hidden groups collect in a "Hidden (n)" footer row for
+ * one-click unhide — this is DISPLAY-ONLY state: nothing in the vault
+ * moves, renames, or deletes. Pin/hide persist per browser in
+ * localStorage alongside the existing collapse state. Year dirs have no
+ * per-year controls — they ride the plain class group (the unfiled
+ * fallback) and are now always flattened rather than competing for cap
+ * slots.
+ *
  * The Scheduled card probes a few plausible cron API method names and
  * renders ONLY if one returns a recognisable job list. LESSON (v1.3.1,
  * React #31 crash on first deploy): cron job fields — notably `schedule`,
@@ -48,8 +61,11 @@ import {
   ChevronRight,
   ClipboardCopy,
   ExternalLink,
+  Eye,
+  EyeOff,
   PanelRightClose,
   PanelRightOpen,
+  Pin,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
@@ -67,6 +83,8 @@ const POLL_MS = 20_000;
 const MAX_PER_GROUP = 8;
 const MAX_SUBDIRS_PER_CLASS = 6;
 const COLLAPSE_KEY = "ds.rail.vault.collapsed";
+const PIN_KEY = "ds.rail.vault.pinned";
+const HIDE_KEY = "ds.rail.vault.hidden";
 const YEAR_RE = /^\d{4}$/;
 
 const CLASS_LABELS: Record<string, string> = {
@@ -92,6 +110,12 @@ interface VaultGroup {
   label: string;
   artifacts: Artifact[];
   hasError: boolean;
+}
+
+/** A hidden group we know exists but deliberately did not fetch/render. */
+interface HiddenGroupRef {
+  key: string;
+  label: string;
 }
 
 function decodeDataUrl(dataUrl: string): string {
@@ -185,75 +209,132 @@ function makeGroup(
 }
 
 /**
- * Bounded walk of the vault v2 tree: class dirs at the root, then at most
- * MAX_SUBDIRS_PER_CLASS most-recently-active subdirs each. Year dirs
- * (^\d{4}$, the unfiled fallback) flatten into the plain class group; every
- * other subdir is a project/client slug and becomes its own
- * "<Class> · <slug>" group. Never throws — subdir listing failures degrade
- * to an empty group.
+ * Bounded walk of the vault v2 tree: class dirs at the root, then their
+ * subdirs. Year dirs (^\d{4}$, the unfiled fallback) always flatten into
+ * the plain class group; every other subdir is a project/client slug and
+ * becomes its own "<Class> · <slug>" group, selected newest-activity-first
+ * up to MAX_SUBDIRS_PER_CLASS. v1.3.4: pinned slugs are always selected
+ * without consuming a cap slot; hidden slugs (and hidden class/other
+ * groups) are skipped without fetching and reported back as HiddenGroupRef
+ * so the footer can offer unhide. Never throws — subdir listing failures
+ * degrade to an empty group.
  */
 async function gatherGroups(
   rootEntries: ManagedFileEntry[],
   errorNames: Set<string>,
-): Promise<VaultGroup[]> {
+  pinned: Set<string>,
+  hidden: Set<string>,
+): Promise<{ groups: VaultGroup[]; hiddenGroups: HiddenGroupRef[] }> {
   const groups: VaultGroup[] = [];
+  const hiddenGroups: HiddenGroupRef[] = [];
   const rootFiles = rootEntries.filter((e) => !e.is_directory);
   if (rootFiles.length) {
-    groups.push(makeGroup("other", "Other", rootFiles, errorNames));
+    if (hidden.has("other")) {
+      hiddenGroups.push({ key: "other", label: "Other" });
+    } else {
+      groups.push(makeGroup("other", "Other", rootFiles, errorNames));
+    }
   }
   const classDirs = rootEntries.filter((e) => e.is_directory);
   for (const dir of classDirs) {
     const entries = await listDirSafe(`${VAULT_DIR}/${dir.name}`);
     const files = entries.filter((e) => !e.is_directory);
+    const label = CLASS_LABELS[dir.name] ?? dir.name;
+    const classHidden = hidden.has(dir.name);
     // Newest-activity subdirs first (v1.3.3): mtime desc, name desc as the
     // tiebreak AND the fallback when the files API omits dir mtimes.
-    const subdirs = entries
+    const allSubdirs = entries
       .filter((e) => e.is_directory)
       .sort(
         (a, b) =>
           ((b.mtime ?? 0) - (a.mtime ?? 0)) || b.name.localeCompare(a.name),
-      )
-      .slice(0, MAX_SUBDIRS_PER_CLASS);
-    const label = CLASS_LABELS[dir.name] ?? dir.name;
-    // Year dirs flatten into the plain class group (unfiled fallback);
-    // every other subdir is a project/client slug and gets its OWN group.
-    let flat = files;
-    for (const sub of subdirs) {
-      const subFiles = (
-        await listDirSafe(`${VAULT_DIR}/${dir.name}/${sub.name}`)
-      ).filter((e) => !e.is_directory);
+      );
+    // v1.3.4 selection: hidden slugs drop out (the cap refills from the
+    // rest), pinned slugs are always in and free; years always flatten.
+    const subdirs: ManagedFileEntry[] = [];
+    let unpinnedCount = 0;
+    let hasYearDir = false;
+    for (const sub of allSubdirs) {
       if (YEAR_RE.test(sub.name)) {
-        flat = flat.concat(subFiles);
-      } else if (subFiles.length) {
-        groups.push(
-          makeGroup(
-            `${dir.name}/${sub.name}`,
-            `${label} · ${sub.name}`,
-            subFiles,
-            errorNames,
-          ),
-        );
+        hasYearDir = true;
+        subdirs.push(sub);
+        continue;
+      }
+      const key = `${dir.name}/${sub.name}`;
+      if (hidden.has(key)) {
+        hiddenGroups.push({ key, label: `${label} · ${sub.name}` });
+        continue;
+      }
+      if (pinned.has(key)) {
+        subdirs.push(sub);
+      } else if (unpinnedCount < MAX_SUBDIRS_PER_CLASS) {
+        subdirs.push(sub);
+        unpinnedCount++;
       }
     }
-    if (flat.length) {
+    // Year dirs flatten into the plain class group (unfiled fallback);
+    // every other selected subdir gets its OWN group.
+    let flat = files;
+    for (const sub of subdirs) {
+      if (YEAR_RE.test(sub.name)) {
+        if (classHidden) continue; // hidden class — skip the fetch entirely
+        const subFiles = (
+          await listDirSafe(`${VAULT_DIR}/${dir.name}/${sub.name}`)
+        ).filter((e) => !e.is_directory);
+        flat = flat.concat(subFiles);
+      } else {
+        const subFiles = (
+          await listDirSafe(`${VAULT_DIR}/${dir.name}/${sub.name}`)
+        ).filter((e) => !e.is_directory);
+        if (subFiles.length) {
+          groups.push(
+            makeGroup(
+              `${dir.name}/${sub.name}`,
+              `${label} · ${sub.name}`,
+              subFiles,
+              errorNames,
+            ),
+          );
+        }
+      }
+    }
+    if (classHidden) {
+      if (files.length || hasYearDir) {
+        hiddenGroups.push({ key: dir.name, label });
+      }
+    } else if (flat.length) {
       groups.push(makeGroup(dir.name, label, flat, errorNames));
     }
   }
-  // Groups ordered by their newest artifact.
-  groups.sort(
-    (a, b) =>
-      (b.artifacts[0]?.sourceMtime ?? 0) - (a.artifacts[0]?.sourceMtime ?? 0),
-  );
-  return groups.filter((g) => g.artifacts.length > 0);
+  // Pinned groups first, then by newest artifact (v1.3.4).
+  groups.sort((a, b) => {
+    const pinDelta = (pinned.has(b.key) ? 1 : 0) - (pinned.has(a.key) ? 1 : 0);
+    if (pinDelta) return pinDelta;
+    return (
+      (b.artifacts[0]?.sourceMtime ?? 0) - (a.artifacts[0]?.sourceMtime ?? 0)
+    );
+  });
+  return {
+    groups: groups.filter((g) => g.artifacts.length > 0),
+    hiddenGroups,
+  };
 }
 
-function loadCollapsed(): Set<string> {
+function loadKeySet(storageKey: string): Set<string> {
   try {
-    const raw = localStorage.getItem(COLLAPSE_KEY);
+    const raw = localStorage.getItem(storageKey);
     const arr = raw ? (JSON.parse(raw) as unknown) : [];
     return new Set(Array.isArray(arr) ? arr.filter((x) => typeof x === "string") : []);
   } catch {
     return new Set();
+  }
+}
+
+function saveKeySet(storageKey: string, set: Set<string>) {
+  try {
+    localStorage.setItem(storageKey, JSON.stringify([...set]));
+  } catch {
+    /* storage unavailable — state just won't persist */
   }
 }
 
@@ -341,7 +422,11 @@ export function WorkspaceRail({
 }) {
   const [tab, setTab] = useState<"vault" | "session">("vault");
   const [groups, setGroups] = useState<VaultGroup[] | null>(null);
-  const [collapsed, setCollapsed] = useState<Set<string>>(loadCollapsed);
+  const [hiddenGroups, setHiddenGroups] = useState<HiddenGroupRef[]>([]);
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => loadKeySet(COLLAPSE_KEY));
+  const [pinned, setPinned] = useState<Set<string>>(() => loadKeySet(PIN_KEY));
+  const [hidden, setHidden] = useState<Set<string>>(() => loadKeySet(HIDE_KEY));
+  const [showHidden, setShowHidden] = useState(false);
   const [vaultError, setVaultError] = useState<string | null>(null);
   const [heartbeat, setHeartbeat] = useState<string | null>(null);
   const [cronJobs, setCronJobs] = useState<CronJobLike[] | null>(null);
@@ -353,11 +438,27 @@ export function WorkspaceRail({
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
       else next.add(key);
-      try {
-        localStorage.setItem(COLLAPSE_KEY, JSON.stringify([...next]));
-      } catch {
-        /* storage unavailable — collapse state just won't persist */
-      }
+      saveKeySet(COLLAPSE_KEY, next);
+      return next;
+    });
+  }, []);
+
+  const togglePin = useCallback((key: string) => {
+    setPinned((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      saveKeySet(PIN_KEY, next);
+      return next;
+    });
+  }, []);
+
+  const toggleHide = useCallback((key: string) => {
+    setHidden((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      saveKeySet(HIDE_KEY, next);
       return next;
     });
   }, []);
@@ -372,7 +473,9 @@ export function WorkspaceRail({
       } catch {
         /* no errors dir yet — fine */
       }
-      setGroups(await gatherGroups(listing.entries, errorNames));
+      const res = await gatherGroups(listing.entries, errorNames, pinned, hidden);
+      setGroups(res.groups);
+      setHiddenGroups(res.hiddenGroups);
       setVaultError(null);
       try {
         const status = await api.readFile(STATUS_FILE);
@@ -388,9 +491,11 @@ export function WorkspaceRail({
     } catch (e) {
       setVaultError(String(e));
     }
-  }, []);
+  }, [pinned, hidden]);
 
-  // Poll while open; one-shot cron probe.
+  // Poll while open; one-shot cron probe. Pin/hide toggles re-create
+  // loadVault, which re-runs this effect — an immediate refresh so the cap
+  // refills without waiting for the next poll tick.
   useEffect(() => {
     if (!open) return;
     void loadVault();
@@ -496,40 +601,67 @@ export function WorkspaceRail({
                 <Spinner aria-label="loading" /> Loading vault…
               </div>
             )}
-            {groups?.length === 0 && (
+            {groups?.length === 0 && hiddenGroups.length === 0 && (
               <div className="px-1 py-4 text-center text-xs text-text-tertiary">
                 No deliverables yet — ask the analyst to stage one.
               </div>
             )}
             {groups?.map((g) => {
               const isCollapsed = collapsed.has(g.key);
+              const isPinned = pinned.has(g.key);
               return (
                 <div key={g.key}>
-                  <button
-                    type="button"
-                    onClick={() => toggleGroup(g.key)}
-                    aria-expanded={!isCollapsed}
-                    title={isCollapsed ? `Expand ${g.label}` : `Collapse ${g.label}`}
-                    className={cn(
-                      "flex w-full cursor-pointer items-center gap-1 rounded border-0 bg-transparent",
-                      "px-0.5 py-1 text-left font-sans text-[0.625rem] font-semibold uppercase",
-                      "tracking-[0.08em] text-text-secondary hover:text-text-primary",
-                    )}
-                  >
-                    {isCollapsed ? (
-                      <ChevronRight className="h-3 w-3 shrink-0" />
-                    ) : (
-                      <ChevronDown className="h-3 w-3 shrink-0" />
-                    )}
-                    <span className="min-w-0 truncate">{g.label}</span>
-                    <span className="text-text-tertiary">({g.artifacts.length})</span>
-                    {g.hasError && (
-                      <AlertCircle
-                        className="h-3 w-3 shrink-0 text-destructive"
-                        aria-label="A file in this group has a render error"
-                      />
-                    )}
-                  </button>
+                  <div className="flex items-center gap-0.5">
+                    <button
+                      type="button"
+                      onClick={() => toggleGroup(g.key)}
+                      aria-expanded={!isCollapsed}
+                      title={isCollapsed ? `Expand ${g.label}` : `Collapse ${g.label}`}
+                      className={cn(
+                        "flex min-w-0 flex-1 cursor-pointer items-center gap-1 rounded border-0 bg-transparent",
+                        "px-0.5 py-1 text-left font-sans text-[0.625rem] font-semibold uppercase",
+                        "tracking-[0.08em] text-text-secondary hover:text-text-primary",
+                      )}
+                    >
+                      {isCollapsed ? (
+                        <ChevronRight className="h-3 w-3 shrink-0" />
+                      ) : (
+                        <ChevronDown className="h-3 w-3 shrink-0" />
+                      )}
+                      <span className="min-w-0 truncate">{g.label}</span>
+                      <span className="text-text-tertiary">({g.artifacts.length})</span>
+                      {g.hasError && (
+                        <AlertCircle
+                          className="h-3 w-3 shrink-0 text-destructive"
+                          aria-label="A file in this group has a render error"
+                        />
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => togglePin(g.key)}
+                      aria-label={isPinned ? `Unpin ${g.label}` : `Pin ${g.label}`}
+                      aria-pressed={isPinned}
+                      title={isPinned ? "Unpin" : "Pin (always shown, sorts first)"}
+                      className={cn(
+                        "flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded border-0 bg-transparent",
+                        isPinned
+                          ? "text-[var(--ds-accent)]"
+                          : "text-text-tertiary/50 hover:text-text-secondary",
+                      )}
+                    >
+                      <Pin className="h-3 w-3" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => toggleHide(g.key)}
+                      aria-label={`Hide ${g.label}`}
+                      title="Hide from rail (files stay in the vault)"
+                      className="flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded border-0 bg-transparent text-text-tertiary/50 hover:text-text-secondary"
+                    >
+                      <EyeOff className="h-3 w-3" />
+                    </button>
+                  </div>
                   {!isCollapsed && (
                     <div className="space-y-2 pt-1">
                       {g.artifacts.map((a) => {
@@ -606,6 +738,49 @@ export function WorkspaceRail({
                 </div>
               );
             })}
+
+            {hiddenGroups.length > 0 && (
+              <div className="pt-1">
+                <button
+                  type="button"
+                  onClick={() => setShowHidden((v) => !v)}
+                  aria-expanded={showHidden}
+                  title={showHidden ? "Collapse hidden groups" : "Show hidden groups"}
+                  className={cn(
+                    "flex w-full cursor-pointer items-center gap-1 rounded border-0 bg-transparent",
+                    "px-0.5 py-1 text-left font-sans text-[0.625rem] font-semibold uppercase",
+                    "tracking-[0.08em] text-text-tertiary hover:text-text-secondary",
+                  )}
+                >
+                  {showHidden ? (
+                    <ChevronDown className="h-3 w-3 shrink-0" />
+                  ) : (
+                    <ChevronRight className="h-3 w-3 shrink-0" />
+                  )}
+                  <span>Hidden ({hiddenGroups.length})</span>
+                </button>
+                {showHidden && (
+                  <div className="space-y-1 pt-1">
+                    {hiddenGroups.map((h) => (
+                      <div key={h.key} className="flex items-center gap-1 px-0.5">
+                        <span className="min-w-0 flex-1 truncate font-sans text-[0.625rem] font-semibold uppercase tracking-[0.08em] text-text-tertiary">
+                          {h.label}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => toggleHide(h.key)}
+                          aria-label={`Unhide ${h.label}`}
+                          title="Unhide"
+                          className="flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded border-0 bg-transparent text-text-tertiary hover:text-text-secondary"
+                        >
+                          <Eye className="h-3 w-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
             {digestJob && (
               <>
