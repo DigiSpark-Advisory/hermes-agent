@@ -46,6 +46,11 @@
  * fallback) and are now always flattened rather than competing for cap
  * slots.
  *
+ * Also in the v1.3.4 batch: the Scheduled card lists ALL cron jobs
+ * (digest + triage + whatever lands next), newest API order, capped at
+ * MAX_CRON_CARDS — the previous card showed only the first digest match,
+ * which went stale the moment a second job existed.
+ *
  * The Scheduled card probes a few plausible cron API method names and
  * renders ONLY if one returns a recognisable job list. LESSON (v1.3.1,
  * React #31 crash on first deploy): cron job fields — notably `schedule`,
@@ -67,7 +72,7 @@ import {
   PanelRightOpen,
   Pin,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { api } from "@/lib/api";
@@ -81,6 +86,7 @@ const ERRORS_DIR = "/opt/data/vault/_render/errors";
 const STATUS_FILE = "/opt/data/vault/_render/status.md";
 const POLL_MS = 20_000;
 const MAX_PER_GROUP = 8;
+const MAX_CRON_CARDS = 6;
 const MAX_SUBDIRS_PER_CLASS = 6;
 const COLLAPSE_KEY = "ds.rail.vault.collapsed";
 const PIN_KEY = "ds.rail.vault.pinned";
@@ -519,14 +525,6 @@ export function WorkspaceRail({
     );
   }, [sessionId]);
 
-  const digestJob = useMemo(() => {
-    if (!cronJobs?.length) return null;
-    return (
-      cronJobs.find((j) => jobLabel(j).toLowerCase().includes("digest")) ??
-      cronJobs[0]
-    );
-  }, [cronJobs]);
-
   if (!open) {
     return (
       <div className="hidden w-9 shrink-0 flex-col items-center border-l border-current/10 pt-3 xl:flex">
@@ -542,10 +540,6 @@ export function WorkspaceRail({
       </div>
     );
   }
-
-  const scheduleText = digestJob ? scheduleLabel(digestJob) : "";
-  const lastStatusText = digestJob ? stringOr(digestJob.last_status) : "";
-  const jobEnabled = digestJob ? digestJob.enabled !== false : true;
 
   return (
     <aside
@@ -782,29 +776,39 @@ export function WorkspaceRail({
               </div>
             )}
 
-            {digestJob && (
+            {cronJobs && cronJobs.length > 0 && (
               <>
                 <div className="px-0.5 pt-2 font-sans text-[0.625rem] font-semibold uppercase tracking-[0.1em] text-text-tertiary">
-                  Scheduled
+                  Scheduled ({cronJobs.length})
                 </div>
-                <div className="rounded-lg border border-current/10 bg-card px-2.5 py-2 shadow-sm">
-                  <div className="flex items-center gap-1.5 text-xs">
-                    <span
-                      className={cn(
-                        "h-1.5 w-1.5 rounded-full",
-                        jobEnabled ? "bg-[var(--ds-green)]" : "bg-muted-foreground",
+                {cronJobs.slice(0, MAX_CRON_CARDS).map((job, i) => {
+                  const scheduleText = scheduleLabel(job);
+                  const lastStatusText = stringOr(job.last_status);
+                  const jobEnabled = job.enabled !== false;
+                  return (
+                    <div
+                      key={stringOr(job.id) || `${jobLabel(job)}-${i}`}
+                      className="rounded-lg border border-current/10 bg-card px-2.5 py-2 shadow-sm"
+                    >
+                      <div className="flex items-center gap-1.5 text-xs">
+                        <span
+                          className={cn(
+                            "h-1.5 w-1.5 rounded-full",
+                            jobEnabled ? "bg-[var(--ds-green)]" : "bg-muted-foreground",
+                          )}
+                        />
+                        <span className="truncate font-semibold">{jobLabel(job)}</span>
+                      </div>
+                      {(scheduleText || lastStatusText) && (
+                        <div className="mt-0.5 pl-3 text-[0.625rem] text-text-tertiary">
+                          {scheduleText && <span className="font-mono-ui">{scheduleText}</span>}
+                          {scheduleText && lastStatusText && <span> · </span>}
+                          {lastStatusText && <span>last: {lastStatusText}</span>}
+                        </div>
                       )}
-                    />
-                    <span className="truncate font-semibold">{jobLabel(digestJob)}</span>
-                  </div>
-                  {(scheduleText || lastStatusText) && (
-                    <div className="mt-0.5 pl-3 text-[0.625rem] text-text-tertiary">
-                      {scheduleText && <span className="font-mono-ui">{scheduleText}</span>}
-                      {scheduleText && lastStatusText && <span> · </span>}
-                      {lastStatusText && <span>last: {lastStatusText}</span>}
                     </div>
-                  )}
-                </div>
+                  );
+                })}
               </>
             )}
           </div>
