@@ -23,6 +23,16 @@
  * display (the date is in the filename); client work groups per slug.
  * Stray files at the deliverables root land in an "Other" group.
  *
+ * v1.3.3 (project groups, wireframe-approved 2026-07-12 night): non-year
+ * subdirs (anything not matching ^\d{4}$) become their OWN groups labelled
+ * "<Class> · <slug>" — so research/<project-slug>/ and client/<slug>/ render
+ * as RESEARCH · PRIME-INTELLECT, CLIENT · ACME, matching the project-grouped
+ * vault convention; year dirs keep flattening into the plain class group
+ * (the unfiled fallback). FIX: v1.3.2 picked subdirs by NAME desc — right
+ * for years, wrong for project slugs (reverse-alphabetical dropped active
+ * projects once a class had >3 subdirs); now mtime desc (name desc as
+ * tiebreak/fallback) with the cap raised to 6.
+ *
  * The Scheduled card probes a few plausible cron API method names and
  * renders ONLY if one returns a recognisable job list. LESSON (v1.3.1,
  * React #31 crash on first deploy): cron job fields — notably `schedule`,
@@ -55,8 +65,9 @@ const ERRORS_DIR = "/opt/data/vault/_render/errors";
 const STATUS_FILE = "/opt/data/vault/_render/status.md";
 const POLL_MS = 20_000;
 const MAX_PER_GROUP = 8;
-const MAX_SUBDIRS_PER_CLASS = 3;
+const MAX_SUBDIRS_PER_CLASS = 6;
 const COLLAPSE_KEY = "ds.rail.vault.collapsed";
+const YEAR_RE = /^\d{4}$/;
 
 const CLASS_LABELS: Record<string, string> = {
   "news-digest": "News digest",
@@ -175,9 +186,11 @@ function makeGroup(
 
 /**
  * Bounded walk of the vault v2 tree: class dirs at the root, then at most
- * MAX_SUBDIRS_PER_CLASS newest subdirs each (year folders sort descending
- * by name; client slugs get one group per slug). Never throws — subdir
- * listing failures degrade to an empty group.
+ * MAX_SUBDIRS_PER_CLASS most-recently-active subdirs each. Year dirs
+ * (^\d{4}$, the unfiled fallback) flatten into the plain class group; every
+ * other subdir is a project/client slug and becomes its own
+ * "<Class> · <slug>" group. Never throws — subdir listing failures degrade
+ * to an empty group.
  */
 async function gatherGroups(
   rootEntries: ManagedFileEntry[],
@@ -192,49 +205,38 @@ async function gatherGroups(
   for (const dir of classDirs) {
     const entries = await listDirSafe(`${VAULT_DIR}/${dir.name}`);
     const files = entries.filter((e) => !e.is_directory);
+    // Newest-activity subdirs first (v1.3.3): mtime desc, name desc as the
+    // tiebreak AND the fallback when the files API omits dir mtimes.
     const subdirs = entries
       .filter((e) => e.is_directory)
-      .sort((a, b) => b.name.localeCompare(a.name))
+      .sort(
+        (a, b) =>
+          ((b.mtime ?? 0) - (a.mtime ?? 0)) || b.name.localeCompare(a.name),
+      )
       .slice(0, MAX_SUBDIRS_PER_CLASS);
-    if (dir.name === "client") {
-      // client/<slug>/ — one group per client, files flat inside
-      for (const sub of subdirs) {
-        const subFiles = (
-          await listDirSafe(`${VAULT_DIR}/client/${sub.name}`)
-        ).filter((e) => !e.is_directory);
-        if (subFiles.length) {
-          groups.push(
-            makeGroup(
-              `client/${sub.name}`,
-              `Client · ${sub.name}`,
-              subFiles,
-              errorNames,
-            ),
-          );
-        }
-      }
-      if (files.length) {
-        groups.push(makeGroup("client", "Client", files, errorNames));
-      }
-    } else {
-      // <class>/YYYY/ — flatten year folders into the class group
-      let all = files;
-      for (const sub of subdirs) {
-        const subFiles = (
-          await listDirSafe(`${VAULT_DIR}/${dir.name}/${sub.name}`)
-        ).filter((e) => !e.is_directory);
-        all = all.concat(subFiles);
-      }
-      if (all.length) {
+    const label = CLASS_LABELS[dir.name] ?? dir.name;
+    // Year dirs flatten into the plain class group (unfiled fallback);
+    // every other subdir is a project/client slug and gets its OWN group.
+    let flat = files;
+    for (const sub of subdirs) {
+      const subFiles = (
+        await listDirSafe(`${VAULT_DIR}/${dir.name}/${sub.name}`)
+      ).filter((e) => !e.is_directory);
+      if (YEAR_RE.test(sub.name)) {
+        flat = flat.concat(subFiles);
+      } else if (subFiles.length) {
         groups.push(
           makeGroup(
-            dir.name,
-            CLASS_LABELS[dir.name] ?? dir.name,
-            all,
+            `${dir.name}/${sub.name}`,
+            `${label} · ${sub.name}`,
+            subFiles,
             errorNames,
           ),
         );
       }
+    }
+    if (flat.length) {
+      groups.push(makeGroup(dir.name, label, flat, errorNames));
     }
   }
   // Groups ordered by their newest artifact.
