@@ -33,6 +33,10 @@
  * projects once a class had >3 subdirs); now mtime desc (name desc as
  * tiebreak/fallback) with the cap raised to 6.
  *
+ * v1.3.6 (Manage-vault link, 2026-07-15): the vault tab links to the
+ * new /vault power page for artifact-grouped archive/restore, bulk ops, and
+ * search; the rail keeps quick archive/pin/hide for glance-speed curation.
+ *
  * v1.3.4 (pin/hide, 2026-07-14): as projects accumulate the rail needs
  * curation, so every group header gains two controls — PIN (pinned groups
  * sort first, and pinned project subdirs are always walked without
@@ -366,7 +370,7 @@ function saveKeySet(storageKey: string, set: Set<string>) {
   }
 }
 
-// ── Archive / trash (v1.3.5) ────────────────────────────────────────
+// ── Archive / trash (v1.3.5) ────────────────────────────────────────────────
 
 /** One file sitting in _trash/, with enough context to restore it. */
 interface TrashEntry {
@@ -708,8 +712,18 @@ export function WorkspaceRail({
       {tab === "vault" ? (
         <div className="flex min-h-0 flex-1 flex-col">
           <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
-            <div className="px-0.5 font-sans text-[0.625rem] font-semibold uppercase tracking-[0.1em] text-text-tertiary">
-              Deliverables
+            <div className="flex items-center justify-between px-0.5">
+              <span className="font-sans text-[0.625rem] font-semibold uppercase tracking-[0.1em] text-text-tertiary">
+                Deliverables
+              </span>
+              {/* v1.3.6: quick-archive/pin/hide stay here for glance-speed
+                  curation; the full artifact-grouped manager lives on /vault. */}
+              <Link
+                to="/vault"
+                className="inline-flex items-center gap-1 text-[0.5625rem] font-semibold uppercase tracking-[0.06em] text-[var(--ds-accent)] hover:underline"
+              >
+                Manage vault <ExternalLink className="h-2.5 w-2.5" />
+              </Link>
             </div>
             {vaultError && (
               <div className="rounded border border-destructive/40 bg-destructive/5 px-2.5 py-2 text-[0.6875rem] text-destructive">
