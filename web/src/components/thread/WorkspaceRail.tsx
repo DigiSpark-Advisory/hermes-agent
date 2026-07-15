@@ -51,6 +51,22 @@
  * MAX_CRON_CARDS — the previous card showed only the first digest match,
  * which went stale the moment a second job existed.
  *
+ * v1.3.5 (archive/trash, 2026-07-14 night): every artifact card gains an
+ * ARCHIVE control (two-step inline confirm — no browser dialogs) that
+ * soft-moves the source + all rendered outputs to
+ * /opt/data/vault/_trash/deliverables/<original-relative-path> via the
+ * EXISTING gateway files API (readFile -> upload-stream -> delete;
+ * COPY-THEN-DELETE order so a mid-move failure can duplicate bytes but
+ * never lose them), then clears the matching _render/errors record. A
+ * "Trash (n)" footer lists archived files with one-click RESTORE (the
+ * reverse move). There is NO hard delete in this UI — emptying _trash/
+ * stays a board-side human action. _trash/ is excluded from the OneDrive
+ * mirror (compose --exclude), so archiving also drops the artifact from
+ * OneDrive within a sync pass. Governance note: these are DASHBOARD-USER
+ * actions riding endpoints that already existed — the agent gains no
+ * capability, and the standing "agent never deletes vault files"
+ * invariant is untouched.
+ *
  * The Scheduled card probes a few plausible cron API method names and
  * renders ONLY if one returns a recognisable job list. LESSON (v1.3.1,
  * React #31 crash on first deploy): cron job fields — notably `schedule`,
@@ -61,6 +77,7 @@
 import { Spinner } from "@nous-research/ui/ui/components/spinner";
 import {
   AlertCircle,
+  ArchiveRestore,
   Check,
   ChevronDown,
   ChevronRight,
@@ -71,6 +88,8 @@ import {
   PanelRightClose,
   PanelRightOpen,
   Pin,
+  Trash2,
+  X,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
@@ -81,12 +100,15 @@ import { cn } from "@/lib/utils";
 import type { ThreadSessionInfo } from "@/hooks/useChatThread";
 import type { ConnectionState } from "@/lib/gatewayClient";
 
-const VAULT_DIR = "/opt/data/vault/deliverables";
-const ERRORS_DIR = "/opt/data/vault/_render/errors";
-const STATUS_FILE = "/opt/data/vault/_render/status.md";
+const VAULT_ROOT = "/opt/data/vault";
+const VAULT_DIR = `${VAULT_ROOT}/deliverables`;
+const TRASH_DIR = `${VAULT_ROOT}/_trash`;
+const ERRORS_DIR = `${VAULT_ROOT}/_render/errors`;
+const STATUS_FILE = `${VAULT_ROOT}/_render/status.md`;
 const POLL_MS = 20_000;
 const MAX_PER_GROUP = 8;
 const MAX_CRON_CARDS = 6;
+const MAX_TRASH_ROWS = 30;
 const MAX_SUBDIRS_PER_CLASS = 6;
 const COLLAPSE_KEY = "ds.rail.vault.collapsed";
 const PIN_KEY = "ds.rail.vault.pinned";
@@ -344,6 +366,56 @@ function saveKeySet(storageKey: string, set: Set<string>) {
   }
 }
 
+// ── Archive / trash (v1.3.5) ────────────────────────────────────────
+
+/** One file sitting in _trash/, with enough context to restore it. */
+interface TrashEntry {
+  name: string;
+  path: string; // full path under TRASH_DIR
+  relDir: string; // dir relative to VAULT_ROOT, e.g. "deliverables/research/peraton"
+}
+
+async function dataUrlToFile(dataUrl: string, name: string): Promise<File> {
+  const res = await fetch(dataUrl);
+  const blob = await res.blob();
+  return new File([blob], name, { type: blob.type || "application/octet-stream" });
+}
+
+/**
+ * Move one file via the files API: read -> mkdir -> upload copy -> delete
+ * original. COPY-THEN-DELETE: any failure before the final step leaves the
+ * original in place (worst case a duplicate copy) — bytes are never lost.
+ */
+async function moveFile(srcPath: string, destDir: string, name: string): Promise<void> {
+  const f = await api.readFile(srcPath);
+  const file = await dataUrlToFile(f.data_url, name);
+  await api.createDirectory(destDir).catch(() => undefined); // may already exist
+  await api.uploadFile(`${destDir}/${name}`, file, true);
+  await api.deleteFile(srcPath);
+}
+
+/** Bounded 3-level walk of _trash/deliverables (class -> subdir -> files). */
+async function gatherTrash(): Promise<TrashEntry[]> {
+  const out: TrashEntry[] = [];
+  const take = (entries: ManagedFileEntry[], relDir: string) => {
+    for (const e of entries) {
+      if (!e.is_directory) out.push({ name: e.name, path: e.path, relDir });
+    }
+  };
+  const root = await listDirSafe(`${TRASH_DIR}/deliverables`);
+  take(root, "deliverables");
+  for (const d1 of root.filter((e) => e.is_directory)) {
+    const l1 = await listDirSafe(`${TRASH_DIR}/deliverables/${d1.name}`);
+    take(l1, `deliverables/${d1.name}`);
+    for (const d2 of l1.filter((e) => e.is_directory)) {
+      const l2 = await listDirSafe(`${TRASH_DIR}/deliverables/${d1.name}/${d2.name}`);
+      take(l2, `deliverables/${d1.name}/${d2.name}`);
+    }
+  }
+  out.sort((a, b) => a.name.localeCompare(b.name));
+  return out.slice(0, MAX_TRASH_ROWS);
+}
+
 function downloadDataUrl(dataUrl: string, name: string) {
   const link = document.createElement("a");
   link.href = dataUrl;
@@ -433,6 +505,10 @@ export function WorkspaceRail({
   const [pinned, setPinned] = useState<Set<string>>(() => loadKeySet(PIN_KEY));
   const [hidden, setHidden] = useState<Set<string>>(() => loadKeySet(HIDE_KEY));
   const [showHidden, setShowHidden] = useState(false);
+  const [trash, setTrash] = useState<TrashEntry[]>([]);
+  const [showTrash, setShowTrash] = useState(false);
+  const [confirmKey, setConfirmKey] = useState<string | null>(null);
+  const [busyPath, setBusyPath] = useState<string | null>(null);
   const [vaultError, setVaultError] = useState<string | null>(null);
   const [heartbeat, setHeartbeat] = useState<string | null>(null);
   const [cronJobs, setCronJobs] = useState<CronJobLike[] | null>(null);
@@ -482,6 +558,7 @@ export function WorkspaceRail({
       const res = await gatherGroups(listing.entries, errorNames, pinned, hidden);
       setGroups(res.groups);
       setHiddenGroups(res.hiddenGroups);
+      setTrash(await gatherTrash());
       setVaultError(null);
       try {
         const status = await api.readFile(STATUS_FILE);
@@ -498,6 +575,55 @@ export function WorkspaceRail({
       setVaultError(String(e));
     }
   }, [pinned, hidden]);
+
+  /** Archive an artifact: soft-move source + every output into _trash/,
+   * preserving the deliverables-relative path, then clear its render-error
+   * record. Sequential, copy-then-delete per file. */
+  const archiveArtifact = useCallback(
+    async (a: Artifact) => {
+      setBusyPath(a.sourcePath);
+      try {
+        const targets = [
+          { path: a.sourcePath, name: a.sourceName },
+          ...a.outputs.map((o) => ({ path: o.path, name: o.name })),
+        ];
+        for (const t of targets) {
+          const rel = t.path.startsWith(`${VAULT_DIR}/`)
+            ? t.path.slice(VAULT_DIR.length + 1)
+            : t.name;
+          const relDir = rel.includes("/") ? rel.slice(0, rel.lastIndexOf("/")) : "";
+          const destDir = relDir
+            ? `${TRASH_DIR}/deliverables/${relDir}`
+            : `${TRASH_DIR}/deliverables`;
+          await moveFile(t.path, destDir, t.name);
+        }
+        await api.deleteFile(`${ERRORS_DIR}/${a.sourceName}.txt`).catch(() => undefined);
+      } catch (e) {
+        setVaultError(`Archive failed (nothing is lost — copy-then-delete): ${String(e)}`);
+      } finally {
+        setBusyPath(null);
+        setConfirmKey(null);
+        void loadVault();
+      }
+    },
+    [loadVault],
+  );
+
+  /** Restore one file from _trash/ back to its original vault location. */
+  const restoreEntry = useCallback(
+    async (t: TrashEntry) => {
+      setBusyPath(t.path);
+      try {
+        await moveFile(t.path, `${VAULT_ROOT}/${t.relDir}`, t.name);
+      } catch (e) {
+        setVaultError(`Restore failed (nothing is lost — copy-then-delete): ${String(e)}`);
+      } finally {
+        setBusyPath(null);
+        void loadVault();
+      }
+    },
+    [loadVault],
+  );
 
   // Poll while open; one-shot cron probe. Pin/hide toggles re-create
   // loadVault, which re-runs this effect — an immediate refresh so the cap
@@ -661,17 +787,24 @@ export function WorkspaceRail({
                       {g.artifacts.map((a) => {
                         const badge = STATE_BADGE[a.state];
                         const primary = a.outputs[0];
+                        const download = () => {
+                          const target =
+                            primary ?? { path: a.sourcePath, name: a.sourceName, ext: "" };
+                          void api
+                            .readFile(target.path)
+                            .then((f) => downloadDataUrl(f.data_url, f.name))
+                            .catch(() => undefined);
+                        };
                         return (
-                          <button
+                          // div-as-button so the archive controls can be REAL
+                          // buttons inside (nested <button> is invalid HTML).
+                          <div
                             key={a.sourcePath}
-                            type="button"
-                            onClick={() => {
-                              const target =
-                                primary ?? { path: a.sourcePath, name: a.sourceName, ext: "" };
-                              void api
-                                .readFile(target.path)
-                                .then((f) => downloadDataUrl(f.data_url, f.name))
-                                .catch(() => undefined);
+                            role="button"
+                            tabIndex={0}
+                            onClick={download}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") download();
                             }}
                             title={primary ? `Download ${primary.name}` : `Download ${a.sourceName}`}
                             className={cn(
@@ -723,8 +856,53 @@ export function WorkspaceRail({
                                     {o.ext}
                                   </span>
                                 ))}
+                              <span className="ml-auto flex items-center gap-0.5">
+                                {busyPath === a.sourcePath ? (
+                                  <Spinner aria-label="archiving" />
+                                ) : confirmKey === a.sourcePath ? (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        void archiveArtifact(a);
+                                      }}
+                                      aria-label={`Confirm archive of ${a.stem}`}
+                                      title="Confirm — move to trash (restorable)"
+                                      className="flex h-5 w-5 cursor-pointer items-center justify-center rounded border-0 bg-transparent text-destructive hover:bg-destructive/10"
+                                    >
+                                      <Check className="h-3 w-3" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setConfirmKey(null);
+                                      }}
+                                      aria-label="Cancel archive"
+                                      title="Cancel"
+                                      className="flex h-5 w-5 cursor-pointer items-center justify-center rounded border-0 bg-transparent text-text-tertiary hover:text-text-secondary"
+                                    >
+                                      <X className="h-3 w-3" />
+                                    </button>
+                                  </>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setConfirmKey(a.sourcePath);
+                                    }}
+                                    aria-label={`Archive ${a.stem}`}
+                                    title="Archive to trash (restorable; no hard delete)"
+                                    className="flex h-5 w-5 cursor-pointer items-center justify-center rounded border-0 bg-transparent text-text-tertiary/50 hover:text-text-secondary"
+                                  >
+                                    <Trash2 className="h-3 w-3" />
+                                  </button>
+                                )}
+                              </span>
                             </span>
-                          </button>
+                          </div>
                         );
                       })}
                     </div>
@@ -771,6 +949,59 @@ export function WorkspaceRail({
                         </button>
                       </div>
                     ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {trash.length > 0 && (
+              <div className="pt-1">
+                <button
+                  type="button"
+                  onClick={() => setShowTrash((v) => !v)}
+                  aria-expanded={showTrash}
+                  title={showTrash ? "Collapse trash" : "Show trash"}
+                  className={cn(
+                    "flex w-full cursor-pointer items-center gap-1 rounded border-0 bg-transparent",
+                    "px-0.5 py-1 text-left font-sans text-[0.625rem] font-semibold uppercase",
+                    "tracking-[0.08em] text-text-tertiary hover:text-text-secondary",
+                  )}
+                >
+                  {showTrash ? (
+                    <ChevronDown className="h-3 w-3 shrink-0" />
+                  ) : (
+                    <ChevronRight className="h-3 w-3 shrink-0" />
+                  )}
+                  <span>Trash ({trash.length})</span>
+                </button>
+                {showTrash && (
+                  <div className="space-y-1 pt-1">
+                    {trash.map((t) => (
+                      <div key={t.path} className="flex items-center gap-1 px-0.5">
+                        <span
+                          className="min-w-0 flex-1 truncate text-[0.625rem] text-text-tertiary"
+                          title={`${t.relDir}/${t.name}`}
+                        >
+                          {t.name}
+                        </span>
+                        {busyPath === t.path ? (
+                          <Spinner aria-label="restoring" />
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => void restoreEntry(t)}
+                            aria-label={`Restore ${t.name}`}
+                            title={`Restore to ${t.relDir}/`}
+                            className="flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded border-0 bg-transparent text-text-tertiary hover:text-text-secondary"
+                          >
+                            <ArchiveRestore className="h-3 w-3" />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                    <div className="px-0.5 text-[0.5625rem] text-text-tertiary/70">
+                      No hard delete here — emptying trash is a board-side action.
+                    </div>
                   </div>
                 )}
               </div>
