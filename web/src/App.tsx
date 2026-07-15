@@ -44,7 +44,6 @@ import {
   Plug,
   Puzzle,
   Radio,
-  RotateCw,
   Settings,
   Shield,
   ShieldCheck,
@@ -80,6 +79,7 @@ import ConfigPage from "@/pages/ConfigPage";
 import DocsPage from "@/pages/DocsPage";
 import EnvPage from "@/pages/EnvPage";
 import FilesPage from "@/pages/FilesPage";
+import VaultPage from "@/pages/VaultPage";
 import SessionsPage from "@/pages/SessionsPage";
 import LogsPage from "@/pages/LogsPage";
 import AnalyticsPage from "@/pages/AnalyticsPage";
@@ -151,6 +151,7 @@ const BUILTIN_ROUTES_CORE: Record<string, ComponentType> = {
   "/": RootRedirect,
   "/sessions": SessionsPage,
   "/files": FilesPage,
+  "/vault": VaultPage,
   "/analytics": AnalyticsPage,
   "/models": ModelsPage,
   "/logs": LogsPage,
@@ -185,6 +186,7 @@ const BUILTIN_NAV_REST: NavItem[] = [
     icon: MessageSquare,
   },
   { path: "/files", label: "Files", icon: FolderOpen },
+  { path: "/vault", label: "Vault", icon: Database },
   {
     path: "/analytics",
     labelKey: "analytics",
@@ -1014,7 +1016,6 @@ function SidebarSystemActions({
   const { activeAction, isBusy, isRunning, pendingAction, runAction } =
     useSystemActions();
   const canUpdateHermes = status?.can_update_hermes === true;
-  const [restartConfirmOpen, setRestartConfirmOpen] = useState(false);
   const [updateConfirmOpen, setUpdateConfirmOpen] = useState(false);
   const [updateConfirmInfo, setUpdateConfirmInfo] =
     useState<UpdateCheckResponse | null>(null);
@@ -1056,15 +1057,11 @@ function SidebarSystemActions({
     );
   }, [t.status.updateHermesConfirmMessage, updateConfirmInfo]);
 
-  const items: SystemActionItem[] = [
-    {
-      action: "restart",
-      icon: RotateCw,
-      label: t.status.restartGateway,
-      runningLabel: t.status.restartingGateway,
-      spin: true,
-    },
-  ];
+  // DigiSpark: the in-gateway "Restart Gateway" action is removed — the
+  // dashboard runs INSIDE the gateway process, so the restart RPC always
+  // fails ("Refusing to restart from inside the gateway process"). Restart
+  // is a board-side action; the command is surfaced as copyable text below.
+  const items: SystemActionItem[] = [];
   if (canUpdateHermes) {
     items.push({
       action: "update",
@@ -1077,22 +1074,11 @@ function SidebarSystemActions({
 
   const handleClick = (action: SystemAction) => {
     if (isBusy) return;
-    if (action === "restart") {
-      setRestartConfirmOpen(true);
-      return;
-    }
     if (action === "update") {
       setUpdateConfirmOpen(true);
       return;
     }
     void runAction(action);
-    navigate("/sessions");
-    onNavigate();
-  };
-
-  const confirmRestart = () => {
-    setRestartConfirmOpen(false);
-    void runAction("restart");
     navigate("/sessions");
     onNavigate();
   };
@@ -1129,6 +1115,15 @@ function SidebarSystemActions({
 
       <GatewayDot collapsed={collapsed} status={status} tooltipWarmRef={tooltipWarmRef} />
 
+      <div className={cn("px-5 pb-1.5 pt-0.5", collapsed && "lg:hidden")}>
+        <span className="block text-[0.625rem] text-text-tertiary">
+          Restart is board-side:
+        </span>
+        <code className="mt-0.5 block select-all break-all font-mono text-[0.625rem] text-text-secondary">
+          sudo docker restart hermes-gateway
+        </code>
+      </div>
+
       <ul className="flex flex-col">
         {items.map((item) => (
           <SystemActionButton
@@ -1144,22 +1139,6 @@ function SidebarSystemActions({
         ))}
       </ul>
     </div>
-
-    <ConfirmDialog
-      cancelLabel={t.common.cancel}
-      confirmLabel={t.status.restartGateway}
-      description={
-        t.status.restartGatewayConfirmMessage ??
-        "This restarts the Hermes gateway process. Connected channels and active sessions will reconnect afterward."
-      }
-      loading={pendingAction === "restart"}
-      onCancel={() => setRestartConfirmOpen(false)}
-      onConfirm={confirmRestart}
-      open={restartConfirmOpen}
-      title={
-        t.status.restartGatewayConfirmTitle ?? `${t.status.restartGateway}?`
-      }
-    />
 
     <ConfirmDialog
       cancelLabel={t.common.cancel}
